@@ -11,6 +11,7 @@ builder.Services.AddRazorComponents()
 
 // Add device-specific services used by the CarSpec.Shared project
 builder.Services.AddSingleton<IFormFactor, FormFactor>();
+builder.Services.AddSingleton<ObdConnectionService>();
 
 var app = builder.Build();
 
