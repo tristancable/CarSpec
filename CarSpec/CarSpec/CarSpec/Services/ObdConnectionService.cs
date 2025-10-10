@@ -1,6 +1,6 @@
 ﻿using System.IO.Ports;
 
-namespace CarSpec.Shared.Services
+namespace CarSpec.Services
 {
     public class ObdConnectionService
     {

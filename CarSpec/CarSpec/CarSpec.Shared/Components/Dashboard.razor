@@ -1,43 +1,49 @@
 ﻿@page "/dashboard"
 @using CarSpec.Shared.Models
-@inject CarSpec.Shared.Services.ObdConnectionService ObdService
+@inject CarSpec.Shared.Services.IObdService ObdService
 
 <h1 class="text-3xl font-bold mb-4">🚗 CarSpec Dashboard</h1>
 
-@if (carData is null)
+@if (!ObdService.IsConnected)
 {
-	<p>No data yet. Connect to OBD adapter to begin.</p>
+    <button class="btn btn-primary" @onclick="ConnectAsync">Connect to OBD</button>
+}
+else if (carData is null)
+{
+    <p>Connected! Waiting for data...</p>
 }
 else
 {
-	<div class="grid grid-cols-2 gap-4">
-		<div>Speed: @carData.Speed mph</div>
-		<div>RPM: @carData.RPM</div>
-		<div>Throttle: @carData.ThrottlePercent %</div>
-		<div>Fuel Level: @carData.FuelLevelPercent %</div>
-		<div>Oil Temp: @carData.OilTempF °F</div>
-		<div>Coolant Temp: @carData.CoolantTempF °F</div>
-		<div>Intake Air: @carData.IntakeTempF °F</div>
-		<div>Last Updated: @carData.LastUpdated</div>
-	</div>
+    <div class="grid grid-cols-2 gap-4">
+        <div>Speed: @carData.Speed mph</div>
+        <div>RPM: @carData.RPM</div>
+        <div>Throttle: @carData.ThrottlePercent %</div>
+        <div>Fuel Level: @carData.FuelLevelPercent %</div>
+        <div>Oil Temp: @carData.OilTempF °F</div>
+        <div>Coolant Temp: @carData.CoolantTempF °F</div>
+        <div>Intake Air: @carData.IntakeTempF °F</div>
+        <div>Last Updated: @carData.LastUpdated</div>
+    </div>
 }
 
 @code {
-	private CarData? carData;
+    private CarData? carData;
 
-	protected override async Task OnInitializedAsync()
-	{
-		// For now, simulate fake data
-		await Task.Delay(500);
-		carData = new CarData
-		{
-			Speed = 0,
-			RPM = 750,
-			ThrottlePercent = 2.5,
-			FuelLevelPercent = 55.0,
-			OilTempF = 200,
-			CoolantTempF = 185,
-			IntakeTempF = 72
-		};
-	}
+    private async Task ConnectAsync()
+    {
+        if (await ObdService.ConnectAsync())
+        {
+            _ = RefreshLoopAsync();
+        }
+    }
+
+    private async Task RefreshLoopAsync()
+    {
+        while (ObdService.IsConnected)
+        {
+            carData = await ObdService.GetLatestDataAsync();
+            StateHasChanged();
+            await Task.Delay(1000);
+        }
+    }
 }
