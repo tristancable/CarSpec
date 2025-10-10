@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using CarSpec.Services;
+using Microsoft.Extensions.Logging;
 
 namespace CarSpec
 {
@@ -15,10 +16,13 @@ namespace CarSpec
                 });
 
             builder.Services.AddMauiBlazorWebView();
+            //builder.Services.AddSingleton<ObdService>();
+            builder.Services.AddSingleton<ObdConnectionService>();
+
 
 #if DEBUG
-    		builder.Services.AddBlazorWebViewDeveloperTools();
-    		builder.Logging.AddDebug();
+            builder.Services.AddBlazorWebViewDeveloperTools();
+            builder.Logging.AddDebug();
 #endif
 
             return builder.Build();

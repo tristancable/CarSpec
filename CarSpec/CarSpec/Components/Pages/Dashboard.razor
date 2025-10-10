@@ -1,0 +1,84 @@
+﻿@page "/dashboard"
+@using CarSpec.Models
+@inject CarSpec.Services.ObdConnectionService ObdService
+
+<h1 class="text-3xl font-bold mb-4">🚗 CarSpec Dashboard</h1>
+
+@if (!ObdService.IsLiveConnected)
+{
+    <button class="btn btn-primary mb-4" @onclick="ConnectAsync">Connect to OBD</button>
+}
+
+<div class="mb-2">
+    <strong>Mode:</strong> @(ObdService.SimulationMode ? "Simulation" : "Live OBD-II")
+</div>
+
+@if (carData is not null)
+{
+    <div class="grid grid-cols-2 gap-4">
+        <div>Speed: @carData.Speed mph</div>
+        <div>RPM: @carData.RPM</div>
+        <div>Throttle: @carData.ThrottlePercent %</div>
+        <div>Fuel Level: @carData.FuelLevelPercent %</div>
+        <div>Oil Temp: @carData.OilTempF °F</div>
+        <div>Coolant Temp: @carData.CoolantTempF °F</div>
+        <div>Intake Air: @carData.IntakeTempF °F</div>
+        <div>Last Updated: @carData.LastUpdated.ToLongTimeString()</div>
+    </div>
+}
+
+@code {
+    private CarData? carData;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Start in simulation mode immediately
+        carData = await ObdService.GetLatestDataAsync();
+
+        // Start data refresh loop
+        _ = Task.Run(async () =>
+        {
+            while (true)
+            {
+                try
+                {
+                    // If live is connected, switch instantly
+                    if (!ObdService.SimulationMode && ObdService.IsLiveConnected)
+                    {
+                        carData = await ObdService.GetLatestDataAsync();
+                        await InvokeAsync(StateHasChanged);
+                    }
+                    else
+                    {
+                        // Simulation
+                        carData = await ObdService.GetLatestDataAsync();
+                        await InvokeAsync(StateHasChanged);
+                    }
+                }
+                catch { }
+                await Task.Delay(1000);
+            }
+        });
+
+        // Attempt live connection in the background
+        _ = Task.Run(async () =>
+        {
+            if (await ObdService.ConnectAsync("COM3")) // replace with your port/device name
+            {
+                Console.WriteLine("[Dashboard] Switched to live OBD-II!");
+                // Force immediate refresh on live connect
+                carData = await ObdService.GetLatestDataAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        });
+    }
+
+    private async Task ConnectAsync()
+    {
+        if (await ObdService.ConnectAsync("COM3"))
+        {
+            carData = await ObdService.GetLatestDataAsync();
+            StateHasChanged();
+        }
+    }
+}
