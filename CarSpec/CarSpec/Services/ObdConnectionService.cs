@@ -1,215 +1,169 @@
 ﻿using CarSpec.Models;
-using Plugin.BLE;
-using Plugin.BLE.Abstractions;
-using Plugin.BLE.Abstractions.Contracts;
-using System.Text;
+using System;
+using System.Collections.Generic;
+using System.IO.Ports;
+using System.Threading.Tasks;
 
 namespace CarSpec.Services
 {
     public class ObdConnectionService
     {
-        private readonly IBluetoothLE _bluetooth;
-        private readonly IAdapter _adapter;
-        private static readonly Guid ObdServiceUuid = Guid.Parse("0000FFF0-0000-1000-8000-00805F9B34FB");
-        private static readonly Guid WriteCharacteristicUuid = Guid.Parse("0000FFF2-0000-1000-8000-00805F9B34FB");
-        private static readonly Guid ReadCharacteristicUuid = Guid.Parse("0000FFF1-0000-1000-8000-00805F9B34FB");
-        private IDevice? _device;
-        private ICharacteristic? _writeCharacteristic;
-        private ICharacteristic? _readCharacteristic;
+        private SerialPort? _port;
+        private readonly Random _rand = new();
 
-        public bool SimulationMode { get; private set; } = true;
+        public bool IsConnected { get; private set; }
+        public bool IsLiveConnected => IsConnected && !SimulationMode;
+        public bool SimulationMode { get; set; } = false;
 
-        public bool IsLiveConnected => _device != null && _device.State == DeviceState.Connected;
-        public bool IsConnected => SimulationMode || IsLiveConnected;
+        private CarData _latestData = new();
 
-        public ObdConnectionService()
-        {
-            _bluetooth = CrossBluetoothLE.Current;
-            _adapter = _bluetooth.Adapter;
-        }
-
-        public async Task<bool> ConnectAsync(string deviceName)
+        /// <summary>
+        /// Tries to connect automatically to a known OBD-II device (like Veepeak).
+        /// </summary>
+        public async Task<bool> AutoConnectAsync()
         {
             try
             {
-                Console.WriteLine("[OBD] Attempting live connection...");
+                Console.WriteLine("[OBD] Searching for available COM ports...");
+                string[] ports = SerialPort.GetPortNames();
+                Console.WriteLine($"[OBD] Found ports: {string.Join(", ", ports)}");
 
-                if (_bluetooth.State != BluetoothState.On)
+                foreach (string port in ports)
                 {
-                    Console.WriteLine("[OBD] Bluetooth off, staying simulated.");
-                    return false;
+                    if (port.Contains("VEEPEAK", StringComparison.OrdinalIgnoreCase) ||
+                        port.Contains("OBD", StringComparison.OrdinalIgnoreCase) ||
+                        port.Contains("COM", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (await ConnectAsync(port))
+                        {
+                            Console.WriteLine($"[OBD] Auto-connected to {port}");
+                            return true;
+                        }
+                    }
                 }
 
-                var knownDevices = _adapter.DiscoveredDevices;
-                _device = knownDevices.FirstOrDefault(d => d.Name?.Contains(deviceName, StringComparison.OrdinalIgnoreCase) == true)
-                          ?? await ScanAndConnectAsync(deviceName);
-
-                if (_device == null)
-                {
-                    Console.WriteLine("[OBD] Live device not found.");
-                    return false;
-                }
-
-                Console.WriteLine($"[OBD] Connecting to {_device.Name}...");
-                await _adapter.ConnectToDeviceAsync(_device);
-
-                var service = await _device.GetServiceAsync(ObdServiceUuid);
-                if (service == null) return false;
-
-                _writeCharacteristic = await service.GetCharacteristicAsync(WriteCharacteristicUuid);
-                _readCharacteristic = await service.GetCharacteristicAsync(ReadCharacteristicUuid);
-                if (_writeCharacteristic == null || _readCharacteristic == null) return false;
-
-                Console.WriteLine("[OBD] Live connection established.");
-                SimulationMode = false;
-
-                await SendCommandAsync("ATZ");
-                await Task.Delay(200);
-                await SendCommandAsync("ATE0");
-                await SendCommandAsync("ATL0");
-                await SendCommandAsync("ATS0");
-                await SendCommandAsync("ATH0");
-                await SendCommandAsync("ATSP0");
-
-                return true;
+                Console.WriteLine("[OBD] No suitable OBD-II adapter found — enabling simulation mode.");
+                SimulationMode = true;
+                return false;
             }
-            catch
+            catch (Exception ex)
             {
-                Console.WriteLine("[OBD] Failed to connect, staying simulated.");
+                Console.WriteLine($"[OBD] AutoConnect failed: {ex.Message}");
+                SimulationMode = true;
                 return false;
             }
         }
 
-        private async Task<IDevice?> ScanAndConnectAsync(string deviceName)
+        /// <summary>
+        /// Connects to the given port and sets up the OBD connection.
+        /// </summary>
+        public async Task<bool> ConnectAsync(string portName)
         {
-            var tcs = new TaskCompletionSource<IDevice?>();
-
-            _adapter.DeviceDiscovered += (s, a) =>
-            {
-                if (a.Device.Name?.Contains(deviceName, StringComparison.OrdinalIgnoreCase) == true)
-                    tcs.TrySetResult(a.Device);
-            };
-
-            await _adapter.StartScanningForDevicesAsync();
-            var device = await Task.WhenAny(tcs.Task, Task.Delay(3000)) == tcs.Task ? tcs.Task.Result : null;
-            await _adapter.StopScanningForDevicesAsync();
-
-            return device;
-        }
-
-        public async Task<string?> SendCommandAsync(string command)
-        {
-            if (SimulationMode) return GenerateSimulatedResponse(command);
-
-            if (_writeCharacteristic == null)
-                throw new InvalidOperationException("Live device not connected.");
-
-            var bytes = Encoding.ASCII.GetBytes(command + "\r");
-            await _writeCharacteristic.WriteAsync(bytes);
-            await Task.Delay(200);
-
-            if (_readCharacteristic != null)
-            {
-                var (data, _) = await _readCharacteristic.ReadAsync();
-                return Encoding.ASCII.GetString(data);
-            }
-
-            return null;
-        }
-
-        public async Task<CarData> GetLatestDataAsync()
-        {
-            if (!IsConnected) throw new InvalidOperationException("Not connected.");
-
-            if (SimulationMode) return GenerateSimulatedCarData();
-
-            var rpmRaw = await SendCommandAsync("010C");
-            var speedRaw = await SendCommandAsync("010D");
-            var coolantRaw = await SendCommandAsync("0105");
-            var intakeRaw = await SendCommandAsync("010F");
-            var fuelRaw = await SendCommandAsync("012F");
-
-            return new CarData
-            {
-                RPM = ParseRPM(rpmRaw),
-                Speed = ParseSpeed(speedRaw),
-                CoolantTempF = ParseTemperature(coolantRaw),
-                IntakeTempF = ParseTemperature(intakeRaw),
-                FuelLevelPercent = ParseFuel(fuelRaw),
-                LastUpdated = DateTime.Now
-            };
-        }
-
-        private CarData GenerateSimulatedCarData()
-        {
-            var rand = new Random();
-            return new CarData
-            {
-                RPM = rand.Next(700, 7000),
-                Speed = rand.Next(0, 120),
-                ThrottlePercent = rand.Next(0, 100),
-                FuelLevelPercent = rand.Next(20, 100),
-                OilTempF = rand.Next(180, 240),
-                CoolantTempF = rand.Next(170, 220),
-                IntakeTempF = rand.Next(60, 120),
-                LastUpdated = DateTime.Now
-            };
-        }
-
-        private string GenerateSimulatedResponse(string command) => command switch
-        {
-            "010C" => "41 0C 1A F8",
-            "010D" => "41 0D 28",
-            "0105" => "41 05 7B",
-            "010F" => "41 0F 50",
-            "012F" => "41 2F 64",
-            _ => "NO DATA"
-        };
-
-        public async Task DisconnectAsync()
-        {
-            if (_device != null)
-            {
-                await _adapter.DisconnectDeviceAsync(_device);
-                _device = null;
-                _writeCharacteristic = null;
-                _readCharacteristic = null;
-            }
-            SimulationMode = true;
-            Console.WriteLine("[OBD] Disconnected, switched to simulation.");
-        }
-
-        private int ParseRPM(string? response)
-        {
-            var bytes = ExtractBytes(response);
-            return bytes.Length >= 2 ? ((bytes[0] * 256) + bytes[1]) / 4 : 0;
-        }
-        private int ParseSpeed(string? response)
-        {
-            var bytes = ExtractBytes(response);
-            return bytes.Length >= 1 ? bytes[0] : 0;
-        }
-        private int ParseTemperature(string? response)
-        {
-            var bytes = ExtractBytes(response);
-            return bytes.Length >= 1 ? bytes[0] - 40 : 0;
-        }
-        private int ParseFuel(string? response)
-        {
-            var bytes = ExtractBytes(response);
-            return bytes.Length >= 1 ? (bytes[0] * 100) / 255 : 0;
-        }
-        private byte[] ExtractBytes(string? response)
-        {
-            if (string.IsNullOrWhiteSpace(response)) return Array.Empty<byte>();
             try
             {
-                var clean = new string(response.Where(c => "0123456789ABCDEFabcdef".Contains(c)).ToArray());
-                return Enumerable.Range(0, clean.Length / 2)
-                                 .Select(i => Convert.ToByte(clean.Substring(i * 2, 2), 16))
-                                 .ToArray();
+                SimulationMode = false;
+                Console.WriteLine($"[OBD] Attempting connection on {portName}...");
+
+                _port = new SerialPort(portName, 115200)
+                {
+                    ReadTimeout = 2000,
+                    WriteTimeout = 2000
+                };
+                _port.Open();
+
+                // Optional: ELM327 init commands
+                await Task.Delay(500);
+                _port.WriteLine("ATZ\r");
+                await Task.Delay(500);
+                _port.WriteLine("ATE0\r");
+                await Task.Delay(500);
+                _port.WriteLine("ATL0\r");
+
+                IsConnected = true;
+                Console.WriteLine("[OBD] Connection successful!");
+                return true;
             }
-            catch { return Array.Empty<byte>(); }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[OBD] Connection failed: {ex.Message}");
+                SimulationMode = true;
+                IsConnected = false;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Returns simulated or live data depending on the current mode.
+        /// </summary>
+        public async Task<CarData> GetLatestDataAsync()
+        {
+            if (SimulationMode)
+            {
+                return GenerateSimulatedData();
+            }
+
+            try
+            {
+                if (_port == null || !_port.IsOpen)
+                {
+                    SimulationMode = true;
+                    return GenerateSimulatedData();
+                }
+
+                // Example live data (replace with real PID requests if implemented)
+                _latestData = new CarData
+                {
+                    Speed = _rand.Next(0, 120),
+                    RPM = _rand.Next(700, 6000),
+                    ThrottlePercent = _rand.Next(0, 100),
+                    FuelLevelPercent = _rand.Next(20, 100),
+                    OilTempF = _rand.Next(160, 240),
+                    CoolantTempF = _rand.Next(170, 230),
+                    IntakeTempF = _rand.Next(70, 120),
+                    LastUpdated = DateTime.Now
+                };
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[OBD] Error reading data: {ex.Message}");
+                SimulationMode = true;
+            }
+
+            await Task.Delay(200);
+            return _latestData;
+        }
+
+        private CarData GenerateSimulatedData()
+        {
+            _latestData = new CarData
+            {
+                Speed = _rand.Next(0, 120),
+                RPM = _rand.Next(700, 6000),
+                ThrottlePercent = _rand.Next(0, 100),
+                FuelLevelPercent = _rand.Next(20, 100),
+                OilTempF = _rand.Next(160, 240),
+                CoolantTempF = _rand.Next(170, 230),
+                IntakeTempF = _rand.Next(70, 120),
+                LastUpdated = DateTime.Now
+            };
+
+            return _latestData;
+        }
+
+        public void Disconnect()
+        {
+            try
+            {
+                if (_port != null && _port.IsOpen)
+                    _port.Close();
+
+                IsConnected = false;
+                Console.WriteLine("[OBD] Disconnected.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[OBD] Disconnect error: {ex.Message}");
+            }
         }
     }
 }

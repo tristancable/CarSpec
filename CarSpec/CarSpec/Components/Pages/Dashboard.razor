@@ -4,18 +4,29 @@
 
 <h1 class="text-3xl font-bold mb-4">🚗 CarSpec Dashboard</h1>
 
-@if (!ObdService.IsLiveConnected)
-{
-    <button class="btn btn-primary mb-4" @onclick="ConnectAsync">Connect to OBD</button>
-}
-
-<div class="mb-2">
-    <strong>Mode:</strong> @(ObdService.SimulationMode ? "Simulation" : "Live OBD-II")
+<div class="mb-3">
+    <strong>Mode:</strong>
+    <span class="badge @(ObdService.SimulationMode ? "bg-yellow-400 text-black" : "bg-green-500 text-white")">
+        @(ObdService.SimulationMode ? "Simulation" : "Live OBD-II")
+    </span>
 </div>
 
-@if (carData is not null)
+@if (ObdService.SimulationMode)
 {
-    <div class="grid grid-cols-2 gap-4">
+    <button class="btn btn-primary mb-4" @onclick="SwitchToLive">🔌 Switch to Live OBD</button>
+}
+else if (!ObdService.IsConnected)
+{
+    <button class="btn btn-primary mb-4" @onclick="ConnectAsync">🔌 Connect to OBD</button>
+}
+
+@if (carData is null)
+{
+    <p>Waiting for data...</p>
+}
+else
+{
+    <div class="grid grid-cols-2 gap-4 mb-6">
         <div>Speed: @carData.Speed mph</div>
         <div>RPM: @carData.RPM</div>
         <div>Throttle: @carData.ThrottlePercent %</div>
@@ -27,58 +38,87 @@
     </div>
 }
 
+<!-- ✅ Live Output Log -->
+<div class="border border-gray-500 rounded-lg p-3 bg-gray-900 text-green-400 font-mono text-sm h-48 overflow-y-auto">
+    <div><strong>📡 OBD-II Log</strong></div>
+    @foreach (var log in outputLog)
+    {
+        <div>@log</div>
+    }
+</div>
+
 @code {
     private CarData? carData;
+    private List<string> outputLog = new();
 
     protected override async Task OnInitializedAsync()
     {
-        // Start in simulation mode immediately
+        Log("Starting dashboard in Simulation Mode...");
+        ObdService.SimulationMode = true;
+
         carData = await ObdService.GetLatestDataAsync();
 
-        // Start data refresh loop
+        // Background refresh loop
         _ = Task.Run(async () =>
         {
             while (true)
             {
                 try
                 {
-                    // If live is connected, switch instantly
-                    if (!ObdService.SimulationMode && ObdService.IsLiveConnected)
-                    {
-                        carData = await ObdService.GetLatestDataAsync();
-                        await InvokeAsync(StateHasChanged);
-                    }
-                    else
-                    {
-                        // Simulation
-                        carData = await ObdService.GetLatestDataAsync();
-                        await InvokeAsync(StateHasChanged);
-                    }
+                    carData = await ObdService.GetLatestDataAsync();
+                    await InvokeAsync(StateHasChanged);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Log($"[Error] {ex.Message}");
+                }
                 await Task.Delay(1000);
-            }
-        });
-
-        // Attempt live connection in the background
-        _ = Task.Run(async () =>
-        {
-            if (await ObdService.ConnectAsync("COM3")) // replace with your port/device name
-            {
-                Console.WriteLine("[Dashboard] Switched to live OBD-II!");
-                // Force immediate refresh on live connect
-                carData = await ObdService.GetLatestDataAsync();
-                await InvokeAsync(StateHasChanged);
             }
         });
     }
 
+    private async Task SwitchToLive()
+    {
+        Log("Attempting to switch to Live OBD-II...");
+        ObdService.SimulationMode = false;
+
+        bool connected = await ObdService.AutoConnectAsync();
+        if (connected)
+        {
+            Log("✅ Switched to Live OBD-II successfully!");
+            carData = await ObdService.GetLatestDataAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+        else
+        {
+            Log("❌ Could not connect — reverting to Simulation Mode.");
+            ObdService.SimulationMode = true;
+        }
+    }
+
     private async Task ConnectAsync()
     {
-        if (await ObdService.ConnectAsync("COM3"))
+        Log("Attempting manual connection to OBD-II device...");
+        bool connected = await ObdService.ConnectAsync("VEEPEAK");
+
+        if (connected)
         {
+            Log("✅ Connected successfully to Live OBD-II!");
             carData = await ObdService.GetLatestDataAsync();
             StateHasChanged();
         }
+        else
+        {
+            Log("❌ Connection failed — staying in Simulation Mode.");
+        }
+    }
+
+    private void Log(string message)
+    {
+        outputLog.Add($"[{DateTime.Now:T}] {message}");
+        if (outputLog.Count > 100)
+            outputLog.RemoveAt(0);
+
+        InvokeAsync(StateHasChanged);
     }
 }
