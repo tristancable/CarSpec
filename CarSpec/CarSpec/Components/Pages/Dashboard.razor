@@ -6,9 +6,24 @@
 
 <div class="mb-3">
     <strong>Mode:</strong>
-    <span class="badge @(ObdService.SimulationMode ? "bg-yellow-400 text-black" : "bg-green-500 text-white")">
-        @(ObdService.SimulationMode ? "Simulation" : "Live OBD-II")
-    </span>
+    @if (ObdService.SimulationMode)
+    {
+        <span class="inline-block ml-2 px-2 py-1 rounded bg-yellow-400 text-black font-semibold">
+            Simulation
+        </span>
+    }
+    else if (ObdService.IsConnected)
+    {
+        <span class="inline-block ml-2 px-2 py-1 rounded bg-green-500 text-black font-semibold">
+            Live OBD-II
+        </span>
+    }
+    else
+    {
+        <span class="inline-block ml-2 px-2 py-1 rounded bg-red-500 text-black font-semibold">
+            Disconnected
+        </span>
+    }
 </div>
 
 @if (ObdService.SimulationMode)
@@ -17,7 +32,7 @@
 }
 else if (!ObdService.IsConnected)
 {
-    <button class="btn btn-primary mb-4" @onclick="ConnectAsync">🔌 Connect to OBD</button>
+    <button class="btn btn-primary mb-4" @onclick="SwitchToLive">🔌 Connect to OBD</button>
 }
 
 @if (carData is null)
@@ -96,23 +111,6 @@ else
         }
     }
 
-    private async Task ConnectAsync()
-    {
-        Log("Attempting manual connection to OBD-II device...");
-        bool connected = await ObdService.ConnectAsync("VEEPEAK");
-
-        if (connected)
-        {
-            Log("✅ Connected successfully to Live OBD-II!");
-            carData = await ObdService.GetLatestDataAsync();
-            StateHasChanged();
-        }
-        else
-        {
-            Log("❌ Connection failed — staying in Simulation Mode.");
-        }
-    }
-
     private void Log(string message)
     {
         outputLog.Add($"[{DateTime.Now:T}] {message}");
@@ -121,4 +119,12 @@ else
 
         InvokeAsync(StateHasChanged);
     }
+
+    private string GetModeText() =>
+        ObdService.SimulationMode ? "Simulation" :
+        (ObdService.IsConnected ? "Live OBD-II" : "Disconnected");
+
+    private string GetModeColor() =>
+        ObdService.SimulationMode ? "bg-yellow-400 text-black" :
+        (ObdService.IsConnected ? "bg-green-500 text-white" : "bg-red-500 text-white");
 }
