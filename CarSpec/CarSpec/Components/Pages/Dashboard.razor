@@ -6,12 +6,7 @@
 
 <div class="mb-3">
     <strong>Mode:</strong>
-    <span class="badge @(ObdService.IsConnecting ? "bg-blue-400 text-black" :
-                                          ObdService.SimulationMode ? "bg-yellow-400 text-black" :
-                                          "bg-green-500 text-black")">
-        @(ObdService.IsConnecting ? "Connecting..." :
-                ObdService.SimulationMode ? "Simulation" : "Live OBD-II")
-    </span>
+    <span class="badge @(GetModeColor())">@GetModeText()</span>
 </div>
 
 @if (ObdService.SimulationMode)
@@ -30,19 +25,19 @@ else if (!ObdService.IsConnected)
 else
 {
     <div class="grid grid-cols-2 gap-4 mb-6">
-        <div>Speed: @carData.Speed mph</div>
-        <div>RPM: @carData.RPM</div>
-        <div>Throttle: @carData.ThrottlePercent %</div>
-        <div>Fuel Level: @carData.FuelLevelPercent %</div>
-        <div>Oil Temp: @carData.OilTempF °F</div>
-        <div>Coolant Temp: @carData.CoolantTempF °F</div>
-        <div>Intake Air: @carData.IntakeTempF °F</div>
-        <div>Last Updated: @carData.LastUpdated.ToLongTimeString()</div>
+        <div><strong>Speed:</strong> @carData.Speed mph</div>
+        <div><strong>RPM:</strong> @carData.RPM</div>
+        <div><strong>Throttle:</strong> @carData.ThrottlePercent %</div>
+        <div><strong>Fuel Level:</strong> @carData.FuelLevelPercent %</div>
+        <div><strong>Oil Temp:</strong> @carData.OilTempF °F</div>
+        <div><strong>Coolant Temp:</strong> @carData.CoolantTempF °F</div>
+        <div><strong>Intake Air:</strong> @carData.IntakeTempF °F</div>
+        <div><strong>Last Updated:</strong> @carData.LastUpdated.ToLongTimeString()</div>
     </div>
 }
 
 <!-- ✅ Live Output Log -->
-<div class="border border-gray-500 rounded-lg p-3 bg-gray-900 text-green-400 font-mono text-sm h-48 overflow-y-auto">
+<div class="border border-gray-600 rounded-lg p-3 bg-gray-900 text-green-400 font-mono text-sm h-48 overflow-y-auto">
     <div><strong>📡 OBD-II Log</strong></div>
     @foreach (var log in outputLog)
     {
@@ -52,35 +47,99 @@ else
 
 @code {
     private CarData? carData;
-    private List<string> outputLog = new();
+    private readonly List<string> outputLog = new();
 
     protected override async Task OnInitializedAsync()
     {
-        // Subscribe to service log updates
+        // Subscribe to unified service log
         ObdService.OnLog += HandleLog;
 
-        Log("Starting dashboard in Simulation Mode...");
+        Log("🚀 Starting CarSpec Dashboard...");
+
+        // Start in simulation mode for now
         ObdService.SimulationMode = true;
 
-        carData = await ObdService.GetLatestDataAsync();
+        try
+        {
+            carData = await ObdService.GetLatestDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Log($"[Error] Failed to get initial data: {ex.Message}");
+        }
 
-        // Background refresh loop
+        // Background data refresh
         _ = Task.Run(async () =>
         {
+            int noDataCount = 0;
+
             while (true)
             {
                 try
                 {
-                    carData = await ObdService.GetLatestDataAsync();
+                    if (ObdService.SimulationMode)
+                    {
+                        // Generate fresh simulated data
+                        carData = CarData.Simulated();
+                    }
+                    else if (ObdService.IsConnected)
+                    {
+                        // Only call live data if we are connected
+                        var latest = await ObdService.GetLatestDataAsync();
+                        carData = latest;
+
+                        if (latest?.Speed == 0 && latest?.RPM == 0)
+                            noDataCount++;
+                        else
+                            noDataCount = 0;
+
+                        if (noDataCount > 10)
+                        {
+                            Log("⚠️ ECU not responding — vehicle may be off. Switching to Simulation Mode.");
+                            ObdService.SimulationMode = true;
+                            carData = CarData.Simulated();
+                        }
+                    }
+                    else
+                    {
+                        // If not connected and not in simulation mode, fallback
+                        ObdService.SimulationMode = true;
+                        carData = CarData.Simulated();
+                    }
+
                     await InvokeAsync(StateHasChanged);
                 }
                 catch (Exception ex)
                 {
-                    Log($"[Error] {ex.Message}");
+                    Log($"[Loop Error] {ex.Message}");
+                    ObdService.SimulationMode = true;
+                    carData = CarData.Simulated();
                 }
+
                 await Task.Delay(1000);
             }
         });
+    }
+
+    private async Task SwitchToLive()
+    {
+        Log("🔌 Attempting to connect to Live OBD-II...");
+
+        ObdService.SimulationMode = false;
+
+        bool connected = await ObdService.AutoConnectAsync();
+        if (connected)
+        {
+            Log("✅ Connected to OBD-II adapter successfully!");
+            carData = await ObdService.GetLatestDataAsync();
+        }
+        else
+        {
+            Log("❌ Connection failed. Reverting to Simulation Mode.");
+            ObdService.SimulationMode = true;
+        }
+
+        await InvokeAsync(StateHasChanged);
     }
 
     private void HandleLog(string message)
@@ -92,46 +151,23 @@ else
         InvokeAsync(StateHasChanged);
     }
 
-    private async Task SwitchToLive()
-    {
-        Log("Attempting to switch to Live OBD-II...");
-        ObdService.SimulationMode = false;
-
-        bool connected = await ObdService.AutoConnectAsync();
-        if (connected)
-        {
-            Log("✅ Switched to Live OBD-II successfully!");
-            carData = await ObdService.GetLatestDataAsync();
-        }
-        else
-        {
-            Log("❌ Could not connect — reverting to Simulation Mode.");
-            ObdService.SimulationMode = true;
-        }
-
-        await InvokeAsync(StateHasChanged);
-    }
-
     private void Log(string message)
     {
-        outputLog.Add($"[{DateTime.Now:T}] {message}");
-        if (outputLog.Count > 100)
-            outputLog.RemoveAt(0);
-
-        InvokeAsync(StateHasChanged);
-    }
-
-    public void Dispose()
-    {
-        // Unsubscribe to prevent memory leaks
-        ObdService.OnLog -= HandleLog;
+        HandleLog(message); // reuse the same logic
     }
 
     private string GetModeText() =>
+        ObdService.IsConnecting ? "Connecting..." :
         ObdService.SimulationMode ? "Simulation" :
         (ObdService.IsConnected ? "Live OBD-II" : "Disconnected");
 
     private string GetModeColor() =>
+        ObdService.IsConnecting ? "bg-blue-400 text-black" :
         ObdService.SimulationMode ? "bg-yellow-400 text-black" :
-        (ObdService.IsConnected ? "bg-green-500 text-white" : "bg-red-500 text-white");
+        (ObdService.IsConnected ? "bg-green-500 text-black" : "bg-red-500 text-white");
+
+    public void Dispose()
+    {
+        ObdService.OnLog -= HandleLog;
+    }
 }

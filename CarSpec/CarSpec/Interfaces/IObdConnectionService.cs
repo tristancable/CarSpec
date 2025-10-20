@@ -1,12 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using CarSpec.Models;
 
 namespace CarSpec.Interfaces
 {
-    internal class IObdConnectionService
+    public interface IObdConnectionService
     {
+        bool IsConnected { get; }
+        bool SimulationMode { get; }
+        Task<bool> ConnectAsync();
+        Task<CarData> GetLatestDataAsync();
     }
 }

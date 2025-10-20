@@ -1,12 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using CarSpec.Models;
 
 namespace CarSpec.Interfaces
 {
-    internal class IElm327Adapter
+    public interface IElm327Adapter
     {
+        bool IsConnected { get; }
+        Task<bool> ConnectAsync();
+        Task<ObdResponse> SendCommandAsync(string command);
+        void Disconnect();
     }
 }

@@ -1,12 +1,14 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace CarSpec.Services.Bluetooth
+﻿namespace CarSpec.Services.Bluetooth
 {
-    internal class BluetoothDeviceScanner
+    /// <summary>
+    /// Handles scanning for nearby Bluetooth devices.
+    /// </summary>
+    public class BluetoothDeviceScanner
     {
+        public async Task<object?> FindDeviceAsync(string name1, string name2)
+        {
+            await Task.Delay(1000); // simulate scan
+            return new object(); // replace with actual device object
+        }
     }
 }
