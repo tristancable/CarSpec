@@ -1,29 +1,17 @@
 ﻿@page "/dashboard"
 @using CarSpec.Models
-@inject CarSpec.Services.ObdConnectionService ObdService
+@inject CarSpec.Services.Obd.ObdConnectionService ObdService
 
 <h1 class="text-3xl font-bold mb-4">🚗 CarSpec Dashboard</h1>
 
 <div class="mb-3">
     <strong>Mode:</strong>
-    @if (ObdService.SimulationMode)
-    {
-        <span class="inline-block ml-2 px-2 py-1 rounded bg-yellow-400 text-black font-semibold">
-            Simulation
-        </span>
-    }
-    else if (ObdService.IsConnected)
-    {
-        <span class="inline-block ml-2 px-2 py-1 rounded bg-green-500 text-black font-semibold">
-            Live OBD-II
-        </span>
-    }
-    else
-    {
-        <span class="inline-block ml-2 px-2 py-1 rounded bg-red-500 text-black font-semibold">
-            Disconnected
-        </span>
-    }
+    <span class="badge @(ObdService.IsConnecting ? "bg-blue-400 text-black" :
+                                          ObdService.SimulationMode ? "bg-yellow-400 text-black" :
+                                          "bg-green-500 text-black")">
+        @(ObdService.IsConnecting ? "Connecting..." :
+                ObdService.SimulationMode ? "Simulation" : "Live OBD-II")
+    </span>
 </div>
 
 @if (ObdService.SimulationMode)
@@ -68,6 +56,9 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        // Subscribe to service log updates
+        ObdService.OnLog += HandleLog;
+
         Log("Starting dashboard in Simulation Mode...");
         ObdService.SimulationMode = true;
 
@@ -92,6 +83,15 @@ else
         });
     }
 
+    private void HandleLog(string message)
+    {
+        outputLog.Add($"[{DateTime.Now:T}] {message}");
+        if (outputLog.Count > 100)
+            outputLog.RemoveAt(0);
+
+        InvokeAsync(StateHasChanged);
+    }
+
     private async Task SwitchToLive()
     {
         Log("Attempting to switch to Live OBD-II...");
@@ -102,13 +102,14 @@ else
         {
             Log("✅ Switched to Live OBD-II successfully!");
             carData = await ObdService.GetLatestDataAsync();
-            await InvokeAsync(StateHasChanged);
         }
         else
         {
             Log("❌ Could not connect — reverting to Simulation Mode.");
             ObdService.SimulationMode = true;
         }
+
+        await InvokeAsync(StateHasChanged);
     }
 
     private void Log(string message)
@@ -118,6 +119,12 @@ else
             outputLog.RemoveAt(0);
 
         InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        // Unsubscribe to prevent memory leaks
+        ObdService.OnLog -= HandleLog;
     }
 
     private string GetModeText() =>

@@ -1,4 +1,4 @@
-﻿using CarSpec.Services;
+﻿using CarSpec.Services.Obd;
 using Microsoft.Extensions.Logging;
 
 namespace CarSpec

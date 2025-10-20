@@ -1,4 +1,4 @@
-﻿namespace CarSpec.Services
+﻿namespace CarSpec.Services.Obd
 {
     public class ObdService
     {

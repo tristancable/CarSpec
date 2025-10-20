@@ -1,0 +1,56 @@
+﻿@page "/bletest"
+@using Plugin.BLE
+@using Plugin.BLE.Abstractions.Contracts
+
+<h2>🔍 BLE Device Scanner</h2>
+
+<button class="btn btn-primary mb-3" @onclick="StartScan">Start Scan</button>
+
+@if (isScanning)
+{
+    <p>Scanning... Please wait ~10 seconds</p>
+}
+
+<ul>
+    @foreach (var d in devices)
+    {
+        <li>@d.Name (@d.Id)</li>
+    }
+</ul>
+
+@if (errorMessage is not null)
+{
+    <p class="text-red-500">@errorMessage</p>
+}
+
+@code {
+    private bool isScanning = false;
+    private List<IDevice> devices = new();
+    private string? errorMessage;
+
+    private async Task StartScan()
+    {
+        try
+        {
+            devices.Clear();
+            errorMessage = null;
+            isScanning = true;
+
+            var adapter = CrossBluetoothLE.Current.Adapter;
+            adapter.DeviceDiscovered += (s, a) =>
+            {
+                if (!devices.Contains(a.Device))
+                    devices.Add(a.Device);
+                InvokeAsync(StateHasChanged);
+            };
+
+            await adapter.StartScanningForDevicesAsync();
+
+            isScanning = false;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+}
