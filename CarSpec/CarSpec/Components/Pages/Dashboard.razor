@@ -1,22 +1,25 @@
-﻿@page "/dashboard"
+﻿@page "/"
+@page "/dashboard"
 @using CarSpec.Models
 @inject CarSpec.Services.Obd.ObdConnectionService ObdService
+@inject IJSRuntime JS
+@implements IAsyncDisposable
 
-<h1 class="text-3xl font-bold mb-4">🚗 CarSpec Dashboard</h1>
+<h1 class="cs-title" style="font-size:26px;margin:6px 0 12px">🚗 CarSpec Dashboard</h1>
 
-<div class="mb-3">
-    <strong>Mode:</strong>
-    <span class="badge @(GetModeColor())">@GetModeText()</span>
+<div class="cs-controls">
+  <div class="cs-badge cs-badge--panel">
+    <span class="label">Mode:</span>
+    <span class="cs-pill @(GetModeClass())">@GetModeText()</span>
+  </div>
+
+  @if (ObdService.SimulationMode || !ObdService.IsConnected)
+  {
+      <button class="cs-btn primary" @onclick="SwitchToLive">
+          🔌 @(ObdService.SimulationMode ? "Switch to Live OBD" : "Connect to OBD")
+      </button>
+  }
 </div>
-
-@if (ObdService.SimulationMode)
-{
-    <button class="btn btn-primary mb-4" @onclick="SwitchToLive">🔌 Switch to Live OBD</button>
-}
-else if (!ObdService.IsConnected)
-{
-    <button class="btn btn-primary mb-4" @onclick="SwitchToLive">🔌 Connect to OBD</button>
-}
 
 @if (carData is null)
 {
@@ -24,30 +27,95 @@ else if (!ObdService.IsConnected)
 }
 else
 {
-    <div class="grid grid-cols-2 gap-4 mb-6">
-        <div><strong>Speed:</strong> @carData.Speed mph</div>
-        <div><strong>RPM:</strong> @carData.RPM</div>
-        <div><strong>Throttle:</strong> @carData.ThrottlePercent %</div>
-        <div><strong>Fuel Level:</strong> @carData.FuelLevelPercent %</div>
-        <div><strong>Oil Temp:</strong> @carData.OilTempF °F</div>
-        <div><strong>Coolant Temp:</strong> @carData.CoolantTempF °F</div>
-        <div><strong>Intake Air:</strong> @carData.IntakeTempF °F</div>
-        <div><strong>Last Updated:</strong> @carData.LastUpdated.ToLongTimeString()</div>
+    <div class="cs-grid" style="margin-bottom:18px">
+        <!-- RPM Gauge -->
+        <section class="cs-card wide">
+          <h3>RPM</h3>
+          <div style="display:grid;place-items:center">
+            <div class="gauge-host">
+              <canvas id="rpmGauge" width="280" height="280" style="display:block;"></canvas>
+            </div>
+          </div>
+        </section>
+
+
+        <!-- Drive stats -->
+        <section class="cs-card">
+            <h3>Drive</h3>
+            <div class="cs-stat">
+                <span class="label">Speed</span>
+                <span class="value">@carData.Speed mph</span>
+            </div>
+            <div class="cs-stat good">
+                <span class="label">Throttle</span>
+                <span class="value">@carData.ThrottlePercent %</span>
+            </div>
+            <div class="cs-stat warn">
+                <span class="label">Fuel Level</span>
+                <span class="value">@carData.FuelLevelPercent %</span>
+            </div>
+        </section>
+
+        <!-- Temps -->
+        <section class="cs-card">
+            <h3>Temps</h3>
+            <div class="cs-stat @(carData.CoolantTempF > 220 ? "bad" : "good")">
+                <span class="label">Coolant</span>
+                <span class="value">@carData.CoolantTempF °F</span>
+            </div>
+            <div class="cs-stat">
+                <span class="label">Oil</span>
+                <span class="value">@carData.OilTempF °F</span>
+            </div>
+            <div class="cs-stat">
+                <span class="label">Intake Air</span>
+                <span class="value">@carData.IntakeTempF °F</span>
+            </div>
+            <div class="cs-stat">
+                <span class="label">Last Updated</span>
+                <span class="value">@carData.LastUpdated.ToLongTimeString()</span>
+            </div>
+        </section>
+
+        <!-- Log -->
+        <section class="cs-card full">
+            <h3>Log</h3>
+            <pre style="background:#0c0f14;border-radius:12px;padding:12px;border:1px solid var(--card-border);max-height:220px;overflow:auto;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;color:#7CFF6B">
+                @string.Join("\n", outputLog.TakeLast(120))
+            </pre>
+        </section>
     </div>
 }
-
-<!-- ✅ Live Output Log -->
-<div class="border border-gray-600 rounded-lg p-3 bg-gray-900 text-green-400 font-mono text-sm h-48 overflow-y-auto">
-    <div><strong>📡 OBD-II Log</strong></div>
-    @foreach (var log in outputLog)
-    {
-        <div>@log</div>
-    }
-</div>
 
 @code {
     private CarData? carData;
     private readonly List<string> outputLog = new();
+
+    // JS module for the canvas gauge
+    private IJSObjectReference? gaugeModule;
+    private bool gaugeReady;
+    const int MaxRpm = 8000;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Load the module and init the gauge
+            gaugeModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/carspec.gauges.js");
+            await gaugeModule.InvokeVoidAsync(
+                "initRpmGauge", "rpmGauge", carData?.RPM ?? 0, MaxRpm,
+                new { startAngle = 46, ticksAngle = 270, units = "rpm", subUnits = "x1000" }
+            );
+            gaugeReady = true;
+        }
+    }
+
+    // Push new RPM to the gauge
+    private async Task SafeSetRpmAsync()
+    {
+        if (gaugeReady && gaugeModule is not null)
+            await gaugeModule.InvokeVoidAsync("setRpm", carData?.RPM ?? 0);
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -56,7 +124,6 @@ else
 
         Log("🚀 Starting CarSpec Dashboard...");
 
-        // Start in simulation mode for now
         ObdService.SimulationMode = true;
 
         try
@@ -79,19 +146,15 @@ else
                 {
                     if (ObdService.SimulationMode)
                     {
-                        // Generate fresh simulated data
                         carData = CarData.Simulated();
                     }
                     else if (ObdService.IsConnected)
                     {
-                        // Only call live data if we are connected
                         var latest = await ObdService.GetLatestDataAsync();
                         carData = latest;
 
-                        if (latest?.Speed == 0 && latest?.RPM == 0)
-                            noDataCount++;
-                        else
-                            noDataCount = 0;
+                        if (latest?.Speed == 0 && latest?.RPM == 0) noDataCount++;
+                        else noDataCount = 0;
 
                         if (noDataCount > 10)
                         {
@@ -102,11 +165,12 @@ else
                     }
                     else
                     {
-                        // If not connected and not in simulation mode, fallback
                         ObdService.SimulationMode = true;
                         carData = CarData.Simulated();
                     }
 
+                    // Push RPM to gauge on UI thread
+                    await InvokeAsync(async () => await SafeSetRpmAsync());
                     await InvokeAsync(StateHasChanged);
                 }
                 catch (Exception ex)
@@ -124,7 +188,6 @@ else
     private async Task SwitchToLive()
     {
         Log("🔌 Attempting to connect to Live OBD-II...");
-
         ObdService.SimulationMode = false;
 
         bool connected = await ObdService.AutoConnectAsync();
@@ -132,6 +195,7 @@ else
         {
             Log("✅ Connected to OBD-II adapter successfully!");
             carData = await ObdService.GetLatestDataAsync();
+            await InvokeAsync(async () => await SafeSetRpmAsync());
         }
         else
         {
@@ -145,29 +209,31 @@ else
     private void HandleLog(string message)
     {
         outputLog.Add($"[{DateTime.Now:T}] {message}");
-        if (outputLog.Count > 100)
+        if (outputLog.Count > 500)
             outputLog.RemoveAt(0);
 
         InvokeAsync(StateHasChanged);
     }
 
-    private void Log(string message)
-    {
-        HandleLog(message); // reuse the same logic
-    }
+    private void Log(string message) => HandleLog(message);
 
     private string GetModeText() =>
         ObdService.IsConnecting ? "Connecting..." :
         ObdService.SimulationMode ? "Simulation" :
         (ObdService.IsConnected ? "Live OBD-II" : "Disconnected");
 
-    private string GetModeColor() =>
-        ObdService.IsConnecting ? "bg-blue-400 text-black" :
-        ObdService.SimulationMode ? "bg-yellow-400 text-black" :
-        (ObdService.IsConnected ? "bg-green-500 text-black" : "bg-red-500 text-white");
+    private string GetModeClass() =>
+        ObdService.IsConnecting ? "is-connecting" :
+        ObdService.SimulationMode ? "is-sim" :
+        (ObdService.IsConnected ? "is-live" : "is-disc");
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
+        if (gaugeModule is not null)
+        {
+            try { await gaugeModule.InvokeVoidAsync("disposeRpmGauge"); } catch { }
+            await gaugeModule.DisposeAsync();
+        }
         ObdService.OnLog -= HandleLog;
     }
 }

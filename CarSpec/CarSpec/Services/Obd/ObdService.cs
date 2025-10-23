@@ -1,7 +1,5 @@
 ﻿using CarSpec.Models;
 using CarSpec.Utils;
-using System;
-using System.Threading.Tasks;
 
 namespace CarSpec.Services.Obd
 {
@@ -28,20 +26,22 @@ namespace CarSpec.Services.Obd
             _adapter = adapter;
         }
 
-        public async Task InitializeAsync()
+        public async Task<bool> InitializeAsync()
         {
             foreach (var cmd in _initCommands)
             {
-                var resp = await _adapter.SendCommandAsync(cmd);
-                if (string.IsNullOrWhiteSpace(resp.RawResponse) || resp.RawResponse.Contains("ERROR"))
+                var response = await _adapter.SendCommandAsync(cmd);
+                if (string.IsNullOrWhiteSpace(response.RawResponse))
                 {
-                    _log.Warn($"⚠️ Init command failed: {cmd} → {resp.RawResponse}");
+                    _log.Warn($"⚠️ No response for {cmd} — ECU may be asleep.");
+                    return false;
                 }
 
-                await Task.Delay(250);
+                await Task.Delay(300);
             }
 
             _log.Info("✅ ELM327 initialization complete.");
+            return true;
         }
 
         public async Task<CarData> GetLatestDataAsync()
@@ -61,7 +61,7 @@ namespace CarSpec.Services.Obd
             catch (Exception ex)
             {
                 _log.Error($"Unhandled exception while reading OBD data: {ex.Message}");
-                return CarData.Simulated(); // fallback
+                return CarData.Simulated();
             }
         }
 

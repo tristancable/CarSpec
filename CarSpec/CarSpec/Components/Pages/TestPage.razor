@@ -1,0 +1,151 @@
+﻿@page "/testpage"
+@using Syncfusion.Blazor.CircularGauge
+
+<div style="display:flex;justify-content:center;padding:24px;">
+    <SfCircularGauge Id="speedGauge" Width="820px" Height="560px" Background="black">
+        <CircularGaugeAxes>
+
+            <!-- MAIN SPEED GAUGE -->
+            <CircularGaugeAxis Radius="78%" StartAngle="230" EndAngle="130" Minimum="0" Maximum="200">
+                <CircularGaugeAxisLineStyle Width="2" Color="#202020" />
+                <CircularGaugeAxisMajorTicks Interval="20" Height="12" Width="2" Offset="6" Color="#ffffff" />
+                <CircularGaugeAxisMinorTicks Interval="5" Height="6" Width="1" Offset="6" Color="#dcdcdc" />
+                <CircularGaugeAxisLabelStyle Offset="6">
+                    <CircularGaugeAxisLabelFont Size="16px" FontWeight="700" Color="#ffffff" />
+                </CircularGaugeAxisLabelStyle>
+
+                <!-- ===== ANNOTATIONS (USE ANGLE + RADIUS ONLY) ===== -->
+                <CircularGaugeAnnotations>
+
+                    <!-- Units (top-center) -->
+                    <CircularGaugeAnnotation Angle="90" Radius="24%" ZIndex="3">
+                        <ContentTemplate>
+                            <div style="color:white;font-size:14px;font-weight:700">Km/h</div>
+                        </ContentTemplate>
+                    </CircularGaugeAnnotation>
+
+                    <!-- Odometer (bottom-center) -->
+                    <CircularGaugeAnnotation Angle="270" Radius="30%" ZIndex="3">
+                        <ContentTemplate>
+                            <div style="border-radius:10px;width:90px;height:28px;background:#414141;display:flex;align-items:center;justify-content:center">
+                                <div style="color:white;font-weight:700;letter-spacing:1px">@Odo</div>
+                            </div>
+                        </ContentTemplate>
+                    </CircularGaugeAnnotation>
+
+                    <!-- Small red dot (cosmetic) -->
+                    <CircularGaugeAnnotation Angle="200" Radius="48%" ZIndex="2">
+                        <ContentTemplate>
+                            <div style="width:8px;height:8px;background:red;border-radius:50%"></div>
+                        </ContentTemplate>
+                    </CircularGaugeAnnotation>
+
+                    <!-- RPM mini-gauge (upper-right, clear of center) -->
+                    <CircularGaugeAnnotation Angle="60" Radius="34%" ZIndex="2">
+                        <ContentTemplate>
+                            <SfCircularGauge Id="rpmGauge" Width="170px" Height="170px" Background="transparent">
+                                <CircularGaugeAxes>
+                                    <CircularGaugeAxis StartAngle="250" EndAngle="-70" Minimum="0" Maximum="9" Radius="95%">
+                                        <CircularGaugeAxisLineStyle Width="1" Color="transparent" />
+                                        <CircularGaugeAxisMajorTicks Interval="1" Height="9" Width="2" Color="#ffffff" />
+                                        <CircularGaugeAxisMinorTicks Interval="0.5" Height="5" Width="1" Color="#bfbfbf" />
+                                        <CircularGaugeAxisLabelStyle Offset="2">
+                                            <CircularGaugeAxisLabelFont Size="10px" Color="#ffffff" FontWeight="700" />
+                                        </CircularGaugeAxisLabelStyle>
+                                        <CircularGaugePointers>
+                                            <CircularGaugePointer Value="@RpmK" Radius="78%" PointerWidth="6" Color="#C10016"
+                                                                  NeedleStartWidth="2" NeedleEndWidth="6">
+                                                <CircularGaugePointerAnimation Enable="true" Duration="220" />
+                                                <CircularGaugeCap Radius="8" Color="#0b0b0b" />
+                                                <CircularGaugeNeedleTail Length="12%" Color="#C10016" />
+                                            </CircularGaugePointer>
+                                        </CircularGaugePointers>
+                                        <CircularGaugeRanges>
+                                            <CircularGaugeRange Start="7.2" End="8.4" StartWidth="10" EndWidth="10" Color="#ff2b2b" RoundedCornerRadius="5" />
+                                        </CircularGaugeRanges>
+                                        <CircularGaugeAnnotations>
+                                            <CircularGaugeAnnotation Angle="90" Radius="-18%">
+                                                <ContentTemplate><div style="color:#cfcfcf;font:600 10px system-ui">x1000 r/min</div></ContentTemplate>
+                                            </CircularGaugeAnnotation>
+                                        </CircularGaugeAnnotations>
+                                    </CircularGaugeAxis>
+                                </CircularGaugeAxes>
+                            </SfCircularGauge>
+                        </ContentTemplate>
+                    </CircularGaugeAnnotation>
+
+                    <!-- Fuel mini-gauge (bottom-left) -->
+                    <CircularGaugeAnnotation Angle="225" Radius="60%" ZIndex="2">
+                        <ContentTemplate>
+                            <SfCircularGauge Id="fuelGauge" Width="140px" Height="140px" Background="transparent">
+                                <CircularGaugeAxes>
+                                    <CircularGaugeAxis StartAngle="200" EndAngle="-20" Minimum="0" Maximum="100" Radius="95%">
+                                        <CircularGaugeAxisLineStyle Width="8" Color="#141414" />
+                                        <CircularGaugeAxisMajorTicks Interval="20" Height="8" Width="2" Color="#ffffff" />
+                                        <CircularGaugeAxisLabelStyle>
+                                            <CircularGaugeAxisLabelFont Size="9px" Color="#ffffff" />
+                                        </CircularGaugeAxisLabelStyle>
+                                        <CircularGaugePointers>
+                                            <CircularGaugePointer Value="@FuelPct" Type="PointerType.RangeBar"
+                                                                  Radius="88%" PointerWidth="10" Color="#22c55e">
+                                                <CircularGaugePointerAnimation Enable="true" Duration="220" />
+                                            </CircularGaugePointer>
+                                        </CircularGaugePointers>
+                                    </CircularGaugeAxis>
+                                </CircularGaugeAxes>
+                            </SfCircularGauge>
+                        </ContentTemplate>
+                    </CircularGaugeAnnotation>
+
+                    <!-- Coolant temp mini-gauge (bottom-right) -->
+                    <CircularGaugeAnnotation Angle="315" Radius="60%" ZIndex="2">
+                        <ContentTemplate>
+                            <SfCircularGauge Id="temperatureGauge" Width="140px" Height="140px" Background="transparent">
+                                <CircularGaugeAxes>
+                                    <CircularGaugeAxis StartAngle="200" EndAngle="-20" Minimum="50" Maximum="120" Radius="95%">
+                                        <CircularGaugeAxisLineStyle Width="8" Color="#141414" />
+                                        <CircularGaugeAxisMajorTicks Interval="10" Height="8" Width="2" Color="#ffffff" />
+                                        <CircularGaugeAxisLabelStyle>
+                                            <CircularGaugeAxisLabelFont Size="9px" Color="#ffffff" />
+                                        </CircularGaugeAxisLabelStyle>
+                                        <CircularGaugePointers>
+                                            <CircularGaugePointer Value="@CoolantC" Type="PointerType.RangeBar"
+                                                                  Radius="88%" PointerWidth="10" Color="#3b82f6">
+                                                <CircularGaugePointerAnimation Enable="true" Duration="220" />
+                                            </CircularGaugePointer>
+                                        </CircularGaugePointers>
+                                        <CircularGaugeRanges>
+                                            <CircularGaugeRange Start="105" End="120" StartWidth="10" EndWidth="10" Color="#ef4444" />
+                                        </CircularGaugeRanges>
+                                    </CircularGaugeAxis>
+                                </CircularGaugeAxes>
+                            </SfCircularGauge>
+                        </ContentTemplate>
+                    </CircularGaugeAnnotation>
+
+                </CircularGaugeAnnotations>
+
+                <!-- MAIN NEEDLE ONLY (removed RangeBar = no big red donut) -->
+                <CircularGaugePointers>
+                    <CircularGaugePointer Value="@Speed" Radius="55%" PointerWidth="8" Color="#C10016"
+                                          NeedleStartWidth="2" NeedleEndWidth="2">
+                        <CircularGaugePointerAnimation Enable="true" Duration="260" />
+                        <CircularGaugeCap Radius="10" Color="#0b0b0b" />
+                        <CircularGaugeNeedleTail Length="15%" Color="#C10016" />
+                    </CircularGaugePointer>
+                </CircularGaugePointers>
+
+            </CircularGaugeAxis>
+        </CircularGaugeAxes>
+    </SfCircularGauge>
+</div>
+
+@code {
+    private string Odo { get; set; } = "35758";
+
+    // Bind these to OBD
+    private double Speed { get; set; } = 72;
+    private double RpmK { get; set; } = 3.4;
+    private double FuelPct { get; set; } = 63;
+    private double CoolantC { get; set; } = 88;
+}

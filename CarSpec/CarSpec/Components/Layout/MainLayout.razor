@@ -1,17 +1,55 @@
 ﻿@inherits LayoutComponentBase
 
-<div class="page">
-    <div class="sidebar">
-        <NavMenu />
-    </div>
+<div class="cs-shell">
+  <nav class="cs-nav">
+    <NavLink href="/dashboard" class="cs-badge" aria-label="Go to dashboard" style="cursor:pointer">
+      <img src="images/logo.png" alt="CarSpec logo" />
+      <span class="cs-title">CarSpec</span>
+    </NavLink>
 
-    <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
-        </div>
+    <span style="flex:1"></span>
 
-        <article class="content px-4">
-            @Body
-        </article>
-    </main>
+    <button class="cs-btn" @onclick="ToggleTheme">
+      <span>@(isDark ? "🌙 Dark" : "☀️ Light")</span>
+    </button>
+    <a href="/dashboard" class="cs-btn">Home</a>
+    <a href="/bletest" class="cs-btn">BLE Test</a>
+    <a href="/testpage" class="cs-btn">Test Page</a>
+  </nav>
+
+  <main class="container cs-main">
+    @Body
+  </main>
+
+  <footer class="cs-footer">
+    © @DateTime.Now.Year CarSpec
+  </footer>
 </div>
+
+@code {
+  bool isDark = true;
+
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    if (firstRender)
+    {
+      await ApplyThemeAsync();
+    }
+  }
+
+  async Task ToggleTheme()
+  {
+    isDark = !isDark;
+    await ApplyThemeAsync();
+    StateHasChanged();
+  }
+
+  async Task ApplyThemeAsync()
+  {
+      var theme = isDark ? "dark" : "light";
+
+      await JS.InvokeVoidAsync("document.documentElement.setAttribute", "data-theme", theme);
+  }
+
+  [Inject] IJSRuntime JS { get; set; } = default!;
+}

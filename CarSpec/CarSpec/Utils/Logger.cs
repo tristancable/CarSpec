@@ -20,19 +20,7 @@ namespace CarSpec.Utils
         {
             var formatted = $"[{DateTime.Now:HH:mm:ss}] [{_tag}] {level}: {msg}";
             Debug.WriteLine(formatted);
-
-            // Add color formatting for console (optional)
-            if (level == "ERROR")
-                Console.ForegroundColor = ConsoleColor.Red;
-            else if (level == "WARN")
-                Console.ForegroundColor = ConsoleColor.Yellow;
-            else if (level == "INFO")
-                Console.ForegroundColor = ConsoleColor.Cyan;
-            else
-                Console.ResetColor();
-
             Console.WriteLine(formatted);
-            Console.ResetColor();
         }
     }
 }

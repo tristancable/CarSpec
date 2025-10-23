@@ -1,5 +1,6 @@
 ﻿using CarSpec.Services.Obd;
 using Microsoft.Extensions.Logging;
+using Syncfusion.Blazor;
 
 namespace CarSpec
 {
@@ -18,7 +19,7 @@ namespace CarSpec
             builder.Services.AddMauiBlazorWebView();
             //builder.Services.AddSingleton<ObdService>();
             builder.Services.AddSingleton<ObdConnectionService>();
-
+            builder.Services.AddSyncfusionBlazor();
 
 #if DEBUG
             builder.Services.AddBlazorWebViewDeveloperTools();

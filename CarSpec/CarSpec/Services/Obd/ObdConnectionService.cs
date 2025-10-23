@@ -34,7 +34,16 @@ namespace CarSpec.Services.Obd
             IsConnecting = true;
             try
             {
+                if (!_bluetooth.IsOn)
+                {
+                    Log("⚠️ Bluetooth is turned off — please enable it to connect.");
+                    SimulationMode = true;
+                    return false;
+                }
+
+                Log("🔍 Scanning for VEEPEAK/OBD...");
                 var device = await _bluetooth.FindDeviceAsync("VEEPEAK", "OBD");
+
                 if (device == null)
                 {
                     Log("⚠️ No OBD device found.");
@@ -53,9 +62,16 @@ namespace CarSpec.Services.Obd
                 }
 
                 _obdService = new ObdService(_adapter);
-                await _obdService.InitializeAsync();
-                SimulationMode = false;
+                bool initOk = await _obdService.InitializeAsync();
 
+                if (!initOk)
+                {
+                    Log("⚠️ ECU did not respond — switching to Simulation Mode.");
+                    SimulationMode = true;
+                    return false;
+                }
+
+                SimulationMode = false;
                 Log("✅ OBD-II adapter connected successfully.");
                 return true;
             }
