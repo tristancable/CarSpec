@@ -13,10 +13,25 @@
     <span class="cs-pill @(GetModeClass())">@GetModeText()</span>
   </div>
 
-  @if (ObdService.SimulationMode || !ObdService.IsConnected)
+  @if (!ObdService.IsAdapterConnected)
   {
       <button class="cs-btn primary" @onclick="SwitchToLive">
-          🔌 @(ObdService.SimulationMode ? "Switch to Live OBD" : "Connect to OBD")
+          🔌 Connect to OBD
+      </button>
+  }
+  else if (ObdService.IsAdapterConnected && !ObdService.IsEcuConnected)
+  {
+      <button class="cs-btn btn-secondary" @onclick="ReconnectEcu">
+          🔁 Reconnect ECU
+      </button>
+      <button class="cs-btn btn-secondary" @onclick="Disconnect">
+            🔌 Disconnect OBD
+      </button>
+  }
+  else if (ObdService.IsEcuConnected)
+  {
+      <button class="cs-btn btn-secondary" @onclick="Disconnect">
+            🔌 Disconnect OBD
       </button>
   }
 </div>
@@ -45,6 +60,10 @@ else
             <div class="cs-stat">
                 <span class="label">Speed</span>
                 <span class="value">@carData.Speed mph</span>
+            </div>
+            <div class="cs-stat">
+                <span class="label">RPM</span>
+                <span class="value">@carData.RPM rpm</span>
             </div>
             <div class="cs-stat good">
                 <span class="label">Throttle</span>
@@ -194,8 +213,32 @@ else
         if (connected)
         {
             Log("✅ Connected to OBD-II adapter successfully!");
-            carData = await ObdService.GetLatestDataAsync();
-            await InvokeAsync(async () => await SafeSetRpmAsync());
+
+            // Start live data loop after ECU confirmation
+            if (!ObdService.SimulationMode && ObdService.IsEcuConnected)
+            {
+                Log("📡 Starting live ECU data stream...");
+                await ObdService.StartLiveDataLoopAsync((rpm, speed) =>
+                {
+                    if (carData == null)
+                        carData = new CarData();
+
+                    carData.RPM = rpm;
+                    carData.Speed = speed;
+                    carData.LastUpdated = DateTime.Now;
+
+                    InvokeAsync(async () =>
+                    {
+                        await SafeSetRpmAsync(); // update the RPM gauge
+                        StateHasChanged();
+                    });
+                });
+            }
+            else
+            {
+                Log("⚠️ ECU not responding — staying in Simulation Mode.");
+                ObdService.SimulationMode = true;
+            }
         }
         else
         {
@@ -203,6 +246,20 @@ else
             ObdService.SimulationMode = true;
         }
 
+        await InvokeAsync(StateHasChanged);
+    }
+
+        private async Task ReconnectEcu()
+    {
+        if (await ObdService.TryReconnectEcuAsync())
+            Log("✅ ECU is now online!");
+        else
+            Log("❌ ECU still offline.");
+    }
+
+    private async Task Disconnect()
+    {
+        await ObdService.Disconnect();
         await InvokeAsync(StateHasChanged);
     }
 
@@ -219,13 +276,15 @@ else
 
     private string GetModeText() =>
         ObdService.IsConnecting ? "Connecting..." :
-        ObdService.SimulationMode ? "Simulation" :
-        (ObdService.IsConnected ? "Live OBD-II" : "Disconnected");
+        ObdService.IsEcuConnected ? "Live ECU Connected" :
+        (ObdService.IsAdapterConnected ? "Adapter Connected (ECU Offline)" :
+        ObdService.SimulationMode ? "Simulation Mode" : "Disconnected");
 
     private string GetModeClass() =>
         ObdService.IsConnecting ? "is-connecting" :
-        ObdService.SimulationMode ? "is-sim" :
-        (ObdService.IsConnected ? "is-live" : "is-disc");
+        ObdService.IsEcuConnected ? "is-live" :
+        (ObdService.IsAdapterConnected ? "is-adapter" :
+        ObdService.SimulationMode ? "is-sim" : "is-disc");
 
     public async ValueTask DisposeAsync()
     {

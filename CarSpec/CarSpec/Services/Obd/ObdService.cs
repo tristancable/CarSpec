@@ -13,12 +13,15 @@ namespace CarSpec.Services.Obd
 
         private readonly string[] _initCommands =
         {
-            "ATZ",   // Reset
-            "ATE0",  // Echo off
-            "ATL0",  // Linefeed off
-            "ATS0",  // Spaces off
-            "ATH0",  // Headers off
-            "ATSP0"  // Auto protocol
+            "ATZ",      // Reset
+            "ATE0",     // Echo off
+            "ATL0",     // Linefeed off
+            "ATS0",     // Spaces off
+            "ATH0",     // Headers off
+            "ATSP 0",   // Auto protocol
+            "ATSI",     // Start slow init (for ISO 9141-2)
+            "ATST FF",  // Extend timeout (Subaru ECUs are slow)
+            "0100"      // Query supported PIDs (wake ECU)
         };
 
         public ObdService(Elm327Adapter adapter)
@@ -28,41 +31,95 @@ namespace CarSpec.Services.Obd
 
         public async Task<bool> InitializeAsync()
         {
+            _log.Info("🔧 Starting ELM327 initialization sequence...");
+
             foreach (var cmd in _initCommands)
             {
+                _log.Info($"➡️ Sending: {cmd}");
                 var response = await _adapter.SendCommandAsync(cmd);
+
                 if (string.IsNullOrWhiteSpace(response.RawResponse))
                 {
-                    _log.Warn($"⚠️ No response for {cmd} — ECU may be asleep.");
-                    return false;
+                    _log.Warn($"⚠️ No response for {cmd} — ECU may still be asleep.");
+                    await Task.Delay(1000);
+                    continue;
                 }
 
-                await Task.Delay(300);
+                _log.Info($"⬅️ Response for {cmd}: {response.RawResponse}");
+                await Task.Delay(500); // Give ECU breathing room
             }
 
-            _log.Info("✅ ELM327 initialization complete.");
-            return true;
+            // Verify ECU is awake
+            _log.Info("🔍 Verifying ECU communication...");
+            var check = await _adapter.SendCommandAsync("0100");
+            if (check.RawResponse.Contains("41"))
+            {
+                _log.Info($"✅ ECU communication confirmed → {check.RawResponse}");
+                return true;
+            }
+            else
+            {
+                _log.Warn($"⚠️ ECU not responding properly → {check.RawResponse}");
+                return false;
+            }
         }
 
         public async Task<CarData> GetLatestDataAsync()
         {
-            try
-            {
-                double rpm = await GetPidAsync("010C", "41 0C");
-                double speed = await GetPidAsync("010D", "41 0D");
+            var rpmResp = await _adapter.SendCommandAsync("010C");
+            await Task.Delay(300); // wait between reads
 
-                return new CarData
-                {
-                    RPM = rpm,
-                    Speed = speed,
-                    LastUpdated = DateTime.Now
-                };
-            }
-            catch (Exception ex)
+            var speedResp = await _adapter.SendCommandAsync("010D");
+            await Task.Delay(300);
+
+            double rpm = ParseRpm(rpmResp.RawResponse);
+            double speed = ParseSpeed(speedResp.RawResponse);
+
+            _log.Info($"📈 Live Data → RPM: {rpm:F0}, Speed: {speed:F1} mph");
+
+            return new CarData
             {
-                _log.Error($"Unhandled exception while reading OBD data: {ex.Message}");
-                return CarData.Simulated();
+                RPM = rpm,
+                Speed = speed,
+                LastUpdated = DateTime.Now
+            };
+        }
+
+        private double ParseRpm(string raw)
+        {
+            if (raw.Contains("41 0C"))
+            {
+                var parts = raw.Split(' ')
+                    .Where(p => p.Length == 2 && int.TryParse(p, System.Globalization.NumberStyles.HexNumber, null, out _))
+                    .Select(p => Convert.ToInt32(p, 16))
+                    .ToArray();
+
+                if (parts.Length >= 4)
+                {
+                    int A = parts[2];
+                    int B = parts[3];
+                    return (A * 256 + B) / 4.0;
+                }
             }
+            return 0;
+        }
+
+        private double ParseSpeed(string raw)
+        {
+            if (raw.Contains("41 0D"))
+            {
+                var parts = raw.Split(' ')
+                    .Where(p => p.Length == 2 && int.TryParse(p, System.Globalization.NumberStyles.HexNumber, null, out _))
+                    .Select(p => Convert.ToInt32(p, 16))
+                    .ToArray();
+
+                if (parts.Length >= 3)
+                {
+                    int A = parts[2];
+                    return A * 0.621371; // km/h → mph
+                }
+            }
+            return 0;
         }
 
         private async Task<double> GetPidAsync(string pid, string expectedHeader)

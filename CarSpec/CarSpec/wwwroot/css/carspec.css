@@ -341,24 +341,34 @@ a.cs-badge:focus {
     color: var(--text);
 }
 
+    /* 🔵 Connecting */
     .cs-pill.is-connecting {
-        box-shadow: 0 0 0 2px rgba(100,149,237,.25) inset;
+        box-shadow: 0 0 0 2px rgba(0, 123, 255, .35) inset; /* #007bff */
         color: #cfe2ff;
     }
 
+    /* ⚙️ Simulation */
     .cs-pill.is-sim {
-        box-shadow: 0 0 0 2px rgba(242,201, 76,.35) inset;
-        color: #ffe8a3;
+        box-shadow: 0 0 0 2px rgba(189, 189, 189, .35) inset; /* ~#bdbdbd */
+        color: #eaeaea;
     }
 
+    /* 🟢 Live ECU Connected */
     .cs-pill.is-live {
-        box-shadow: 0 0 0 2px rgba( 37,211,102,.35) inset;
+        box-shadow: 0 0 0 2px rgba(57, 255, 20, .35) inset; /* #39ff14 */
         color: #b9f6cf;
     }
 
+    /* 🟡 Adapter Connected (ECU Offline) */
+    .cs-pill.is-adapter {
+        box-shadow: 0 0 0 2px rgba(255, 167, 81, .35) inset; /* between #ffe259 and #ffa751 */
+        color: #ffe8a3;
+    }
+
+    /* 🔴 Disconnected */
     .cs-pill.is-disc {
-        box-shadow: 0 0 0 2px rgba(255, 77, 79,.35) inset;
-        color: #ffb3b3;
+        box-shadow: 0 0 0 2px rgba(255, 65, 108, .35) inset; /* #ff416c */
+        color: #ffb3c2;
     }
 
 /* ========== Utilities & A11y ========== */
