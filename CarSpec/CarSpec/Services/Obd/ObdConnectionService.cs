@@ -14,6 +14,7 @@ namespace CarSpec.Services.Obd
         private Elm327Adapter? _adapter;
         private ObdService? _obdService;
         private readonly Logger _log = new("OBD-CONNECT");
+        private CancellationTokenSource? _liveCts;
 
         public bool SimulationMode { get; set; } = true;
         public bool IsConnected => _adapter?.IsConnected ?? false;
@@ -29,100 +30,55 @@ namespace CarSpec.Services.Obd
             _bluetooth.OnLog += Log;
         }
 
-        public async Task<bool> AutoConnectAsync() => await ConnectAsync();
+        public async Task<bool> AutoConnectAsync()
+        {
+            if (!await EnsureAdapterAsync())
+                return false;
+
+            return await ConnectAsync();
+        }
 
         public async Task<bool> ConnectAsync()
         {
-            IsConnecting = true;
-            IsAdapterConnected = false;
-            IsEcuConnected = false;
-            SimulationMode = true;
-
             try
             {
-                if (!_bluetooth.IsOn)
+                IsConnecting = true;
+                Log("🔌 Starting ELM327 connection...");
+
+                if (!await EnsureAdapterAsync())
+                    return false;
+
+                var ok = await _adapter!.ConnectAsync(); // Elm327Adapter handles init + ECU wake
+                IsAdapterConnected = _adapter.IsConnected;
+                IsEcuConnected = _adapter.IsEcuAwake;
+
+                if (!ok || !_adapter.IsConnected)
                 {
-                    Log("⚠️ Bluetooth is turned off — please enable it to connect.");
+                    Log("❌ Adapter connect failed.");
+                    SimulationMode = true;
+                    _obdService = null; // ensure null in failure case
                     return false;
                 }
 
-                Log("🔍 Scanning for VEEPEAK/OBD...");
-                var device = await _bluetooth.FindDeviceAsync("VEEPEAK", "OBD");
-
-                if (device == null)
+                if (!_adapter.IsEcuAwake)
                 {
-                    Log("⚠️ No OBD device found.");
-                    return false;
-                }
-
-                _adapter = new Elm327Adapter(device);
-                _adapter.OnLog += Log;
-
-                // --- Step 1: Connect to adapter ---
-                if (!await _adapter.ConnectAsync())
-                {
-                    Log("❌ Failed to connect to adapter.");
-                    return false;
-                }
-
-                IsAdapterConnected = true;
-                SimulationMode = false;
-                Log("✅ Connected to ELM327 adapter.");
-                await _adapter.SendCommandAsync("010C");
-                await _adapter.SendCommandAsync("010D");
-
-                // --- Step 2: Verify ECU communication ---
-                Log("🔎 Checking ECU communication...");
-
-                bool ecuAwake = false;
-
-                for (int attempt = 1; attempt <= 3; attempt++)
-                {
-                    var ecuResp = await _adapter.SendCommandAsync("0100");
-                    var cleaned = ecuResp.RawResponse?
-                        .Replace("\r", "")
-                        .Replace("\n", "")
-                        .Replace(">", "")
-                        .Replace(" ", "")
-                        .ToUpperInvariant() ?? "";
-
-                    Log($"🔍 ECU Attempt {attempt} → {cleaned}");
-
-                    if (cleaned.Contains("4100") || cleaned.Contains("41") && cleaned.Length >= 6)
-                    {
-                        ecuAwake = true;
-                        SimulationMode = false;
-                        IsEcuConnected = true;
-                        Log($"✅ ECU communication established on attempt {attempt}! → {cleaned}");
-                        break;
-                    }
-                    else if (cleaned.Contains("BUSINIT") || cleaned.Contains("STOPPED") || cleaned.Contains("SEARCHING"))
-                    {
-                        Log($"⏳ Attempt {attempt}: ECU initializing → {cleaned}");
-                        await Task.Delay(1500);
-                        continue;
-                    }
-                    else
-                    {
-                        Log($"⚠️ Attempt {attempt}: ECU not ready → {cleaned}");
-                        await Task.Delay(1000);
-                    }
-                }
-
-                IsEcuConnected = ecuAwake;
-                SimulationMode = !ecuAwake;
-
-                if (ecuAwake)
-                    Log("✅ ECU communication confirmed! Live ECU Mode enabled.");
-                else
                     Log("⚠️ ECU not responding — staying in Simulation Mode.");
+                    SimulationMode = true;
+                    _obdService = null; // ECU not up yet; no live service
+                    return true;        // adapter is connected, ECU not awake yet
+                }
 
+                // ✅ ECU is awake → create the high-level OBD service
+                _obdService = new ObdService(_adapter);
+
+                SimulationMode = false;
+                Log("✅ Live OBD connected.");
                 return true;
             }
             catch (Exception ex)
             {
-                Log($"[Error] Connection failed: {ex.Message}");
-                SimulationMode = true;
+                Log($"❌ Connect exception: {ex.Message}");
+                _obdService = null;
                 return false;
             }
             finally
@@ -131,47 +87,210 @@ namespace CarSpec.Services.Obd
             }
         }
 
-        // Continuously reads live data once ECU connection is active
-        public async Task StartLiveDataLoopAsync(Action<int, int>? onDataReceived = null)
+        /// <summary>
+        /// Build the Elm327Adapter by discovering a compatible BLE device via BluetoothManager.
+        /// Tries several common OBD-II adapter names.
+        /// </summary>
+        private async Task<bool> EnsureAdapterAsync()
         {
-            if (_adapter == null || !_adapter.IsConnected || !IsEcuConnected)
+            if (_adapter != null) return true;
+
+            Log("🔍 Scanning for ELM327 BLE devices...");
+
+            var pairs = new (string a, string b)[]
             {
-                Log("⚠️ Cannot start live data loop — ECU not connected.");
+        ("VEEPEAK", "OBD"),
+        ("OBDII",   "ELM"),
+        ("V-LINK",  "OBD"),
+            };
+
+            Plugin.BLE.Abstractions.Contracts.IDevice? device = null;
+
+            foreach (var (a, b) in pairs)
+            {
+                device = await _bluetooth.FindDeviceAsync(a, b);
+                if (device != null)
+                {
+                    Log($"✅ Found device: {device.Name}");
+                    break;
+                }
+            }
+
+            if (device == null)
+            {
+                Log("❌ No compatible BLE device found.");
+                return false;
+            }
+
+            // ✔ Pass the device directly; Elm327Adapter will construct BleObdTransport internally
+            _adapter = new Elm327Adapter(device);
+
+            // (optional) surface adapter logs through this service
+            _adapter.OnLog += Log;
+
+            IsAdapterConnected = false;
+            IsEcuConnected = false;
+            return true;
+        }
+
+        /// <summary>
+        /// Send standard ELM327 init sequence and verify OKs where appropriate.
+        /// </summary>
+        private async Task<bool> InitializeAdapterAsync()
+        {
+            try
+            {
+                // Common, safe init sequence for ELM327
+                // Reset
+                if (!await SendExpectOk("ATZ", allowNoOk: true)) { Log("⚠️ ATZ no OK (often normal)"); }
+
+                // Echo off, linefeeds off, spaces off, headers off, protocol auto
+                if (!await SendExpectOk("ATE0")) return false;
+                if (!await SendExpectOk("ATL0")) return false;
+                if (!await SendExpectOk("ATS0")) return false;
+                if (!await SendExpectOk("ATH0")) return false;
+                if (!await SendExpectOk("ATSP0")) return false;
+
+                // Optional: increase timeout a bit for some ECUs
+                await SendExpectOk("ATST0A", allowNoOk: true);
+
+                Log("✅ Adapter initialized.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log($"❌ InitializeAdapterAsync error: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Try a simple Mode 01 PID (0100) to confirm ECU is awake/responding.
+        /// </summary>
+        private async Task<bool> ConfirmEcuAwakeAsync()
+        {
+            try
+            {
+                var resp = await _adapter!.SendCommandAsync("0100");
+                var raw = (resp?.RawResponse ?? string.Empty).ToUpperInvariant();
+
+                // Typical success contains "41 00 ..." (available PIDs)
+                if (raw.Contains("41") && raw.Contains("00"))
+                    return true;
+
+                // Some adapters add "NO DATA" if ignition off
+                if (raw.Contains("NO DATA") || string.IsNullOrWhiteSpace(raw))
+                    return false;
+
+                // Fallback: any hex bytes back that aren't pure prompts may be OK
+                return raw.Any(ch => "0123456789ABCDEF".Contains(ch));
+            }
+            catch (Exception ex)
+            {
+                Log($"❌ ConfirmEcuAwakeAsync error: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Helper: send a command and check if "OK" appears (ELM327 style).
+        /// </summary>
+        private async Task<bool> SendExpectOk(string cmd, bool allowNoOk = false)
+        {
+            var resp = await _adapter!.SendCommandAsync(cmd);
+            var raw = (resp?.RawResponse ?? string.Empty).ToUpperInvariant();
+
+            if (raw.Contains("OK")) return true;
+            if (allowNoOk) return true;
+
+            // Some firmwares omit OK after reset; accept a non-empty, non-error line
+            if (!string.IsNullOrWhiteSpace(raw) && !raw.Contains("?") && !raw.Contains("ERROR"))
+                return true;
+
+            Log($"❌ Expected OK for '{cmd}', got: '{raw.Trim()}'");
+            return false;
+        }
+
+        // New overload: streams a full CarData snapshot each tick
+        public async Task StartLiveDataLoopAsync(Action<CarData>? onData = null)
+        {
+            // cancel any prior loop
+            CancelLiveLoop();
+            _liveCts = new CancellationTokenSource();
+            var token = _liveCts.Token;
+
+            if (_adapter == null || !_adapter.IsConnected || SimulationMode)
+            {
+                Log("⚠️ Cannot start live data loop — adapter not connected or in Simulation Mode.");
                 return;
             }
 
-            _obdService = new ObdService(_adapter); // create or reuse your service
-
-            Log("📡 Starting live data polling...");
-
-            while (IsEcuConnected && !SimulationMode)
+            Log("📡 Starting live data polling (full CarData)...");
+            try
             {
-                try
+                while (!token.IsCancellationRequested)
                 {
-                    // Request Engine RPM (PID 010C)
-                    var rpmResp = await _adapter.SendCommandAsync("010C");
-                    var rpm = ParseRpm(rpmResp.RawResponse);
+                    // snapshot the adapter reference to avoid races with _adapter = null
+                    var adapter = _adapter;
+                    if (adapter == null || !adapter.IsConnected || SimulationMode)
+                        break;
 
-                    await Task.Delay(200);
+                    try
+                    {
+                        // Request set (pace gently)
+                        var r010C = await adapter.SendCommandAsync("010C"); // RPM
+                        if (token.IsCancellationRequested) break; await Task.Delay(150, token);
 
-                    // Request Vehicle Speed (PID 010D)
-                    var speedResp = await _adapter.SendCommandAsync("010D");
-                    var speed = ParseSpeed(speedResp.RawResponse);
+                        var r010D = await adapter.SendCommandAsync("010D"); // Speed
+                        if (token.IsCancellationRequested) break; await Task.Delay(150, token);
 
-                    Log($"📈 Live Data → RPM: {rpm}, Speed: {speed} km/h");
+                        var r0111 = await adapter.SendCommandAsync("0111"); // Throttle %
+                        if (token.IsCancellationRequested) break; await Task.Delay(150, token);
 
-                    // Trigger UI update callback
-                    onDataReceived?.Invoke(rpm, speed);
+                        var r012F = await adapter.SendCommandAsync("012F"); // Fuel %
+                        if (token.IsCancellationRequested) break; await Task.Delay(150, token);
+
+                        var r0105 = await adapter.SendCommandAsync("0105"); // Coolant °C
+                        if (token.IsCancellationRequested) break; await Task.Delay(150, token);
+
+                        var r010F = await adapter.SendCommandAsync("010F"); // IAT °C
+                        if (token.IsCancellationRequested) break; await Task.Delay(150, token);
+
+                        var r015C = await adapter.SendCommandAsync("015C"); // Oil °C (may be unsupported)
+
+                        var cd = new CarData
+                        {
+                            RPM = ParseRpm(r010C.RawResponse),
+                            Speed = ParseSpeed(r010D.RawResponse),
+                            ThrottlePercent = ParseThrottle(r0111.RawResponse),
+                            FuelLevelPercent = ParseFuelLevel(r012F.RawResponse),
+                            CoolantTempF = ParseCoolantF(r0105.RawResponse),
+                            IntakeTempF = ParseIntakeF(r010F.RawResponse),
+                            OilTempF = ParseOilF(r015C.RawResponse),
+                            LastUpdated = DateTime.Now
+                        };
+
+                        onData?.Invoke(cd);
+                    }
+                    catch (TaskCanceledException) { break; }
+                    catch (OperationCanceledException) { break; }
+                    catch (ObjectDisposedException)
+                    {
+                        // adapter disposed during disconnect
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"⚠️ Live data read error: {ex.Message}");
+                    }
+
+                    try { await Task.Delay(600, token); } catch { break; }
                 }
-                catch (Exception ex)
-                {
-                    Log($"⚠️ Live data read error: {ex.Message}");
-                }
-
-                await Task.Delay(1500); // 1-second refresh interval
             }
-
-            Log("🛑 Live data loop ended.");
+            finally
+            {
+                Log("🛑 Live data loop ended.");
+            }
         }
 
         public async Task<bool> TryReconnectEcuAsync()
@@ -190,6 +309,11 @@ namespace CarSpec.Services.Obd
                 Log("✅ ECU reconnected successfully!");
                 IsEcuConnected = true;
                 SimulationMode = false;
+
+                // Ensure service exists once ECU is responding again
+                if (_obdService == null)
+                    _obdService = new ObdService(_adapter);
+
                 return true;
             }
 
@@ -205,8 +329,17 @@ namespace CarSpec.Services.Obd
             return await _obdService.GetLatestDataAsync();
         }
 
+        private void CancelLiveLoop()
+        {
+            try { _liveCts?.Cancel(); } catch { /* ignore */ }
+            _liveCts = null;
+        }
+
         public Task Disconnect()
         {
+            // stop polling first
+            CancelLiveLoop();
+
             if (_adapter != null)
             {
                 try
@@ -233,31 +366,114 @@ namespace CarSpec.Services.Obd
             return Task.CompletedTask;
         }
 
+        // ---- Shared helpers ----
+        private static string CleanHex(string s) =>
+            (s ?? string.Empty).Replace("\r", "").Replace("\n", "").Replace(" ", "").Replace(">", "").ToUpperInvariant();
+
+        private static int IndexOfMarker(string clean, string marker)
+        {
+            var idx = clean.IndexOf(marker, StringComparison.Ordinal);
+            return idx >= 0 ? idx : -1;
+        }
+
+        // ---- RPM (010C) ----
         private int ParseRpm(string response)
         {
             try
             {
-                // Expected format: 410CXXXX (A=B1, B=B2)
-                var clean = response.Replace(" ", "").Replace(">", "").ToUpperInvariant();
-                if (!clean.StartsWith("410C") || clean.Length < 8) return 0;
-
-                var A = Convert.ToInt32(clean.Substring(4, 2), 16);
-                var B = Convert.ToInt32(clean.Substring(6, 2), 16);
+                var clean = CleanHex(response);
+                var i = IndexOfMarker(clean, "410C");
+                if (i < 0 || clean.Length < i + 8) return 0;
+                var A = Convert.ToInt32(clean.Substring(i + 4, 2), 16);
+                var B = Convert.ToInt32(clean.Substring(i + 6, 2), 16);
                 return ((A * 256) + B) / 4;
             }
             catch { return 0; }
         }
 
+        // ---- Speed mph (010D) ----
         private int ParseSpeed(string response)
         {
             try
             {
-                // Expected format: 410DXX
-                var clean = response.Replace(" ", "").Replace(">", "").ToUpperInvariant();
-                if (!clean.StartsWith("410D") || clean.Length < 6) return 0;
+                var clean = CleanHex(response);
+                var i = IndexOfMarker(clean, "410D");
+                if (i < 0 || clean.Length < i + 6) return 0;
+                var A = Convert.ToInt32(clean.Substring(i + 4, 2), 16); // km/h
+                return (int)Math.Round(A * 0.621371);
+            }
+            catch { return 0; }
+        }
 
-                var A = Convert.ToInt32(clean.Substring(4, 2), 16);
-                return A; // km/h
+        // ---- Throttle % (0111) ---- Absolute Throttle Position
+        private double ParseThrottle(string response)
+        {
+            try
+            {
+                var clean = CleanHex(response);
+                var i = IndexOfMarker(clean, "4111");
+                if (i < 0 || clean.Length < i + 6) return 0;
+                var A = Convert.ToInt32(clean.Substring(i + 4, 2), 16);
+                return Math.Round(A * 100.0 / 255.0, 1);
+            }
+            catch { return 0; }
+        }
+
+        // ---- Fuel Level % (012F) ----
+        private double ParseFuelLevel(string response)
+        {
+            try
+            {
+                var clean = CleanHex(response);
+                var i = IndexOfMarker(clean, "412F");
+                if (i < 0 || clean.Length < i + 6) return 0;
+                var A = Convert.ToInt32(clean.Substring(i + 4, 2), 16);
+                return Math.Round(A * 100.0 / 255.0, 1);
+            }
+            catch { return 0; }
+        }
+
+        // Convert °C to °F
+        private static double CtoF(int c) => Math.Round((c * 9.0 / 5.0) + 32.0, 1);
+
+        // ---- Coolant Temp °F (0105) ----
+        private double ParseCoolantF(string response)
+        {
+            try
+            {
+                var clean = CleanHex(response);
+                var i = IndexOfMarker(clean, "4105");
+                if (i < 0 || clean.Length < i + 6) return 0;
+                var A = Convert.ToInt32(clean.Substring(i + 4, 2), 16);
+                return CtoF(A - 40);
+            }
+            catch { return 0; }
+        }
+
+        // ---- Intake Air Temp °F (010F) ----
+        private double ParseIntakeF(string response)
+        {
+            try
+            {
+                var clean = CleanHex(response);
+                var i = IndexOfMarker(clean, "410F");
+                if (i < 0 || clean.Length < i + 6) return 0;
+                var A = Convert.ToInt32(clean.Substring(i + 4, 2), 16);
+                return CtoF(A - 40);
+            }
+            catch { return 0; }
+        }
+
+        // ---- Engine Oil Temp °F (015C) ---- (not all ECUs support this)
+        private double ParseOilF(string response)
+        {
+            try
+            {
+                var clean = CleanHex(response);
+                var i = IndexOfMarker(clean, "415C");
+                if (i < 0 || clean.Length < i + 6) return 0; // not supported or no data
+                var A = Convert.ToInt32(clean.Substring(i + 4, 2), 16);
+                return CtoF(A - 40);
             }
             catch { return 0; }
         }

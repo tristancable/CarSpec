@@ -59,6 +59,11 @@ namespace CarSpec.Services.Obd
                         : $"⚠️ Command {cmd} returned no data.");
                 }
 
+                await SendCommandAsync("ATAL");
+                await Task.Delay(200);
+                await SendCommandAsync("ATAT1");
+                await Task.Delay(200);
+
                 // --- Try Multiple Protocols ---
                 bool protocolOK = false;
                 string[] protocolSequence = { "ATSP0", "ATSPA", "ATSP3" };
@@ -104,8 +109,10 @@ namespace CarSpec.Services.Obd
 
                 var finalProto = await SendCommandAsync("ATDP");
                 Log($"📡 Active protocol: {finalProto.RawResponse}");
-                await SendCommandAsync("ATH0");
-                await Task.Delay(1000);
+                //await SendCommandAsync("ATH0");
+                //await Task.Delay(1000);
+                await SendCommandAsync("ATH1");
+                await Task.Delay(800);
 
                 // --- Verify ECU Communication ---
                 await Task.Delay(2000);
@@ -134,6 +141,14 @@ namespace CarSpec.Services.Obd
                     if (cleaned.Contains("4100"))
                     {
                         IsEcuAwake = true;
+
+                        // 🧭 Log PID support bitmap for 01–20 (includes 010C/010D)
+                        LogPidSupport(cleaned);
+
+                        // Return to headerless for normal parsing
+                        await SendCommandAsync("ATH0");
+                        await Task.Delay(300);
+
                         Log($"✅ ECU communication established on attempt {attempt}! → {cleaned}");
                         break;
                     }
@@ -170,34 +185,90 @@ namespace CarSpec.Services.Obd
 
         public async Task<ObdResponse> SendCommandAsync(string command)
         {
-            await _transport.WriteAsync(command + "\r");
-            var sb = new StringBuilder();
-            var timeout = DateTime.Now.AddSeconds(6);
-
-            while (DateTime.Now < timeout)
+            try
             {
-                var chunk = await _transport.ReadAsync();
-                if (!string.IsNullOrEmpty(chunk))
+                await _transport.WriteAsync(command + "\r");
+                var sb = new StringBuilder();
+                var timeout = DateTime.Now.AddSeconds(8);
+
+                while (DateTime.Now < timeout)
                 {
-                    sb.Append(chunk);
-                    if (chunk.Contains('>')) break;
+                    var chunk = await _transport.ReadAsync();
+                    if (!string.IsNullOrEmpty(chunk))
+                    {
+                        sb.Append(chunk);
+                        if (chunk.Contains('>')) break;
+                    }
+                    await Task.Delay(50);
                 }
 
-                await Task.Delay(50);
+                string response = sb.ToString().Trim();
+
+                if (response.Contains("STOPPED", StringComparison.OrdinalIgnoreCase))
+                {
+                    Log($"⚠️ ECU returned STOPPED for {command} → waiting and retrying once...");
+                    await Task.Delay(800);
+                    return await SendCommandAsync(command);
+                }
+
+                await Task.Delay(250);
+                return new ObdResponse { Command = command, RawResponse = response };
             }
-
-            string response = sb.ToString().Trim();
-
-            // 🚧 Handle STOPPED gracefully
-            if (response.Contains("STOPPED", StringComparison.OrdinalIgnoreCase))
+            catch (ObjectDisposedException)
             {
-                Log($"⚠️ ECU returned STOPPED for {command} → waiting and retrying once...");
-                await Task.Delay(800); // give ECU breathing room
-                return await SendCommandAsync(command);
+                // Transport went away during disconnect
+                return new ObdResponse { Command = command, RawResponse = string.Empty };
             }
+            catch (TaskCanceledException)
+            {
+                return new ObdResponse { Command = command, RawResponse = string.Empty };
+            }
+            catch (OperationCanceledException)
+            {
+                return new ObdResponse { Command = command, RawResponse = string.Empty };
+            }
+        }
 
-            await Task.Delay(250); // ← pacing delay between each PID
-            return new ObdResponse { Command = command, RawResponse = response };
+        /// <summary>
+        /// Logs whether standard PIDs 010C (RPM) and 010D (Speed) are advertised
+        /// in the 0x4100 support bitmap (PIDs 01–20).
+        /// </summary>
+        private void LogPidSupport(string cleaned4100)
+        {
+            try
+            {
+                // cleaned4100 is something like "...4100BE3FA811..."
+                var idx = cleaned4100.IndexOf("4100", StringComparison.Ordinal);
+                if (idx < 0 || cleaned4100.Length < idx + 12)
+                {
+                    Log("🧭 PID support: could not parse 4100 bitmap.");
+                    return;
+                }
+
+                // Next 8 hex chars after '4100' are the 32-bit bitmap for PIDs 01–20
+                var mapHex = cleaned4100.Substring(idx + 4, 8);
+                var map = Convert.ToUInt32(mapHex, 16);
+
+                bool supports010C = HasPid(map, 0x0C); // RPM
+                bool supports010D = HasPid(map, 0x0D); // Speed
+
+                Log($"🧭 PID support → 010C(RPM): {(supports010C ? "yes" : "no")}, 010D(Speed): {(supports010D ? "yes" : "no")} (bitmap 0x{mapHex})");
+            }
+            catch (Exception ex)
+            {
+                Log($"🧭 PID support parse error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Bitmap helper: for the PID support word (PIDs 01–20), MSB is PID 01, LSB is PID 20.
+        /// </summary>
+        private static bool HasPid(uint map, int pid /* 1..32 */)
+        {
+            // For PID N, bit index is (32 - N)
+            int bit = 32 - pid;
+            if (bit < 0 || bit > 31) return false;
+            return (map & (1u << bit)) != 0;
         }
 
         private void Log(string message)

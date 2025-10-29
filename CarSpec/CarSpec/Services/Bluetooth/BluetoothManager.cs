@@ -33,27 +33,37 @@ namespace CarSpec.Services.Bluetooth
             OnLog?.Invoke($"🔍 Scanning for {name1}/{name2} devices...");
 
             IDevice? foundDevice = null;
-            _adapter.DeviceDiscovered += (s, a) =>
+
+            // Capture handler so we can unsubscribe
+            void Handler(object? s, DeviceEventArgs a)
             {
-                if (a.Device != null && !string.IsNullOrEmpty(a.Device.Name))
+                var d = a.Device;
+                if (d != null && !string.IsNullOrEmpty(d.Name))
                 {
-                    if (a.Device.Name.Contains(name1, StringComparison.OrdinalIgnoreCase) ||
-                        a.Device.Name.Contains(name2, StringComparison.OrdinalIgnoreCase))
+                    if (d.Name.Contains(name1, StringComparison.OrdinalIgnoreCase) ||
+                        d.Name.Contains(name2, StringComparison.OrdinalIgnoreCase))
                     {
-                        foundDevice = a.Device;
+                        foundDevice = d;
+                        // Try to stop early if supported
+                        try { _adapter.StopScanningForDevicesAsync(); } catch { /* ignore */ }
                     }
                 }
-            };
+            }
+
+            _adapter.DeviceDiscovered += Handler;
 
             try
             {
-                await _adapter.StartScanningForDevicesAsync();
+                await _adapter.StartScanningForDevicesAsync(); // returns when scan stops
             }
             catch (Exception ex)
             {
                 OnLog?.Invoke($"❌ Bluetooth scan failed: {ex.Message}");
+                _adapter.DeviceDiscovered -= Handler;
                 return null;
             }
+
+            _adapter.DeviceDiscovered -= Handler;
 
             if (foundDevice == null)
                 OnLog?.Invoke("⚠️ No matching Bluetooth devices found.");
