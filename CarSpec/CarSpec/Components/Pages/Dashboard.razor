@@ -53,7 +53,6 @@ else
           </div>
         </section>
 
-
         <!-- Drive stats -->
         <section class="cs-card">
             <h3>Drive</h3>
@@ -109,6 +108,9 @@ else
 @code {
     private CarData? carData;
     private readonly List<string> outputLog = new();
+    private CancellationTokenSource? _simCts;
+    private readonly TimeSpan _simTick = TimeSpan.FromSeconds(1);
+    private bool _liveLoopRunning;
 
     // JS module for the canvas gauge
     private IJSObjectReference? gaugeModule;
@@ -143,8 +145,6 @@ else
 
         Log("🚀 Starting CarSpec Dashboard...");
 
-        ObdService.SimulationMode = true;
-
         try
         {
             carData = await ObdService.GetLatestDataAsync();
@@ -154,82 +154,63 @@ else
             Log($"[Error] Failed to get initial data: {ex.Message}");
         }
 
-        // Background data refresh
+        // Start simulation producer; it only updates while SimulationMode == true
+        StartSimulationLoop();
+    }
+
+    private void StartSimulationLoop()
+    {
+        _simCts?.Cancel();
+        _simCts = new CancellationTokenSource();
+        var token = _simCts.Token;
+
         _ = Task.Run(async () =>
         {
-            int noDataCount = 0;
-
-            while (true)
+            while (!token.IsCancellationRequested)
             {
                 try
                 {
                     if (ObdService.SimulationMode)
                     {
                         carData = CarData.Simulated();
-                    }
-                    else if (ObdService.IsConnected)
-                    {
-                        var latest = await ObdService.GetLatestDataAsync();
-                        carData = latest;
-
-                        if (latest?.Speed == 0 && latest?.RPM == 0) noDataCount++;
-                        else noDataCount = 0;
-
-                        if (noDataCount > 10)
+                        await InvokeAsync(async () =>
                         {
-                            Log("⚠️ ECU not responding — vehicle may be off. Switching to Simulation Mode.");
-                            ObdService.SimulationMode = true;
-                            carData = CarData.Simulated();
-                        }
+                            await SafeSetRpmAsync();
+                            StateHasChanged();
+                        });
                     }
-                    else
-                    {
-                        ObdService.SimulationMode = true;
-                        carData = CarData.Simulated();
-                    }
-
-                    // Push RPM to gauge on UI thread
-                    await InvokeAsync(async () => await SafeSetRpmAsync());
-                    await InvokeAsync(StateHasChanged);
                 }
-                catch (Exception ex)
-                {
-                    Log($"[Loop Error] {ex.Message}");
-                    ObdService.SimulationMode = true;
-                    carData = CarData.Simulated();
-                }
+                catch { /* ignore */ }
 
-                await Task.Delay(1000);
+                try { await Task.Delay(_simTick, token); } catch { }
             }
-        });
+        }, token);
     }
 
     private async Task SwitchToLive()
     {
+        if (_liveLoopRunning) return; // Gaurd against multi clicking
         Log("🔌 Attempting to connect to Live OBD-II...");
-        ObdService.SimulationMode = false;
 
         bool connected = await ObdService.AutoConnectAsync();
         if (connected)
         {
             Log("✅ Connected to OBD-II adapter successfully!");
+            await ZeroOutDataAsync();
 
             // Start live data loop after ECU confirmation
             if (!ObdService.SimulationMode && ObdService.IsEcuConnected)
             {
                 Log("📡 Starting live ECU data stream...");
-                await ObdService.StartLiveDataLoopAsync((rpm, speed) =>
-                {
-                    if (carData == null)
-                        carData = new CarData();
+                _liveLoopRunning = true;
 
-                    carData.RPM = rpm;
-                    carData.Speed = speed;
-                    carData.LastUpdated = DateTime.Now;
+                _ = ObdService.StartLiveDataLoopAsync(cd =>
+                {
+                    carData = cd;
 
                     InvokeAsync(async () =>
                     {
-                        await SafeSetRpmAsync(); // update the RPM gauge
+                        await SafeSetRpmAsync(); // This keeps the RPM gauge in sync
                         StateHasChanged();
                     });
                 });
@@ -237,30 +218,48 @@ else
             else
             {
                 Log("⚠️ ECU not responding — staying in Simulation Mode.");
-                ObdService.SimulationMode = true;
+            }
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ReconnectEcu()
+    {
+        if (await ObdService.TryReconnectEcuAsync())
+        {
+            Log("✅ ECU is now online!");
+            await ZeroOutDataAsync();
+
+            if (!ObdService.SimulationMode && ObdService.IsEcuConnected && !_liveLoopRunning)
+            {
+                Log("📡 Resuming live ECU data stream...");
+                _liveLoopRunning = true;
+
+                _ = ObdService.StartLiveDataLoopAsync(cd =>
+                {
+                    carData = cd;
+
+                    InvokeAsync(async () =>
+                    {
+                        await SafeSetRpmAsync();
+                        StateHasChanged();
+                    });
+                });
             }
         }
         else
         {
-            Log("❌ Connection failed. Reverting to Simulation Mode.");
-            ObdService.SimulationMode = true;
-        }
-
-        await InvokeAsync(StateHasChanged);
-    }
-
-        private async Task ReconnectEcu()
-    {
-        if (await ObdService.TryReconnectEcuAsync())
-            Log("✅ ECU is now online!");
-        else
             Log("❌ ECU still offline.");
+        }
     }
 
     private async Task Disconnect()
     {
+        _liveLoopRunning = false;
         await ObdService.Disconnect();
         await InvokeAsync(StateHasChanged);
+        ObdService.SimulationMode = true;
     }
 
     private void HandleLog(string message)
@@ -286,8 +285,28 @@ else
         (ObdService.IsAdapterConnected ? "is-adapter" :
         ObdService.SimulationMode ? "is-sim" : "is-disc");
 
+     private async Task ZeroOutDataAsync()
+     {
+         carData ??= new CarData();
+         carData.RPM = 0;
+         carData.Speed = 0;
+         carData.ThrottlePercent = 0;
+         carData.FuelLevelPercent = 0;
+         carData.CoolantTempF = 0;
+         carData.OilTempF = 0;
+         carData.IntakeTempF = 0;
+         carData.LastUpdated = DateTime.Now;
+
+         await SafeSetRpmAsync();
+         await InvokeAsync(StateHasChanged);
+     }
+
+
     public async ValueTask DisposeAsync()
     {
+        _simCts?.Cancel();
+        _simCts = null;
+
         if (gaugeModule is not null)
         {
             try { await gaugeModule.InvokeVoidAsync("disposeRpmGauge"); } catch { }

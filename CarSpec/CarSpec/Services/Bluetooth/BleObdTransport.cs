@@ -1,8 +1,11 @@
 ﻿using CarSpec.Interfaces;
 using CarSpec.Utils;
+using Plugin.BLE.Abstractions;
 using Plugin.BLE.Abstractions.Contracts;
-using System.Text;
+using Plugin.BLE.Abstractions.EventArgs;
+using System;
 using System.Collections.Concurrent;
+using System.Text;
 
 namespace CarSpec.Services.Bluetooth
 {
@@ -12,7 +15,9 @@ namespace CarSpec.Services.Bluetooth
         private readonly IDevice _device;
         private ICharacteristic? _tx;
         private ICharacteristic? _rx;
+        private EventHandler<CharacteristicUpdatedEventArgs>? _rxHandler;
         private readonly ConcurrentQueue<string> _responseQueue = new();
+        private volatile bool _isConnected;
 
         public BleObdTransport(object device)
         {
@@ -20,100 +25,109 @@ namespace CarSpec.Services.Bluetooth
                 ?? throw new ArgumentException("Device must be of type IDevice.", nameof(device));
         }
 
+        // Implements IObdTransport.ConnectAsync()
         public async Task<bool> ConnectAsync()
         {
-            _log.Info($"🔗 Connecting to BLE device: {_device.Name ?? "Unknown"}");
+            _log.Info($"🔗 Using provided BLE device: {_device.Name ?? "Unknown"}");
 
-            try
+            if (!await DiscoverChannelsAsync())
             {
-                var service = await _device.GetServiceAsync(Guid.Parse("0000FFF0-0000-1000-8000-00805F9B34FB"));
-                if (service == null)
-                {
-                    _log.Error("❌ FFF0 service not found on device.");
-                    return false;
-                }
-
-                _tx = await service.GetCharacteristicAsync(Guid.Parse("0000FFF2-0000-1000-8000-00805F9B34FB"));
-                _rx = await service.GetCharacteristicAsync(Guid.Parse("0000FFF1-0000-1000-8000-00805F9B34FB"));
-
-                if (_tx == null || _rx == null)
-                {
-                    _log.Error("❌ Missing TX or RX characteristic on FFF0 service.");
-                    return false;
-                }
-
-                _rx.ValueUpdated += (s, e) =>
-                {
-                    try
-                    {
-                        var bytes = e.Characteristic.Value;
-                        if (bytes == null || bytes.Length == 0)
-                            return;
-
-                        string raw = Encoding.ASCII.GetString(bytes).Trim();
-                        string hex = BitConverter.ToString(bytes).Replace("-", " ");
-                        _log.LogDebug($"⬅️ [RAW BYTES] {hex}");
-                        _log.LogDebug($"⬅️ [RAW TEXT] \"{raw}\"");
-
-                        // Always enqueue raw so we don't lose banners like "ELM327 v2.2"
-                        if (!string.IsNullOrWhiteSpace(raw))
-                            _responseQueue.Enqueue(raw);
-
-                        // Still enqueue cleaned text for PID data later
-                        string cleaned = CleanResponse(raw);
-                        if (!string.IsNullOrWhiteSpace(cleaned))
-                            _responseQueue.Enqueue(cleaned);
-                    }
-                    catch (Exception ex)
-                    {
-                        _log.Error($"[RX Handler Error] {ex.Message}");
-                    }
-                };
-
-                await _rx.StartUpdatesAsync();
-                _log.Info("📡 Notifications enabled for RX characteristic.");
-
-                // Give the chip time to wake
-                _log.Info("⏳ Waiting for ELM327 to initialize (2.5s)...");
-                await Task.Delay(2500);
-
-                await WriteAsync("ATZ");
-                string resp = await ReadAsync();
-
-                // Combine and preserve raw responses (skip CleanResponse filtering)
-                if (string.IsNullOrWhiteSpace(resp))
-                {
-                    _log.Warn("⚠️ Connected but no immediate response from ELM327. Try restarting the adapter.");
-                    return false;
-                }
-
-                // Accept both version banners and echoed ATZ replies
-                if (resp.Contains("ELM327", StringComparison.OrdinalIgnoreCase) ||
-                    resp.Contains("ATZ", StringComparison.OrdinalIgnoreCase))
-                {
-                    _log.Info($"✅ ELM327 responded successfully: {resp}");
-                    return true;
-                }
-
-                // Wait a bit and try one more read, in case banner arrives slightly delayed
-                await Task.Delay(800);
-                string followUp = await ReadAsync();
-                if (!string.IsNullOrWhiteSpace(followUp) &&
-                    followUp.Contains("ELM327", StringComparison.OrdinalIgnoreCase))
-                {
-                    _log.Info($"✅ ELM327 chip responded after delay: {followUp}");
-                    return true;
-                }
-
-                _log.Warn($"⚠️ Unexpected ELM327 handshake response: {resp}");
+                _log.Error("❌ Could not discover a valid RX/TX pair on the device.");
                 return false;
             }
-            catch (Exception ex)
+
+            // Wire notifications
+            _rxHandler = (s, e) =>
             {
-                _log.Error($"Connection error: {ex.Message}");
-                return false;
-            }
+                try
+                {
+                    var data = e.Characteristic?.Value;
+                    if (data == null || data.Length == 0) return;
+
+                    var text = Encoding.ASCII.GetString(data);
+                    var clean = CleanResponse(text);
+                    if (!string.IsNullOrWhiteSpace(clean))
+                    {
+                        _responseQueue.Enqueue(clean);
+                        // Optional: _log.LogDebug($"⬅️ {clean}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _log.Warn($"⚠️ RX handler error: {ex.Message}");
+                }
+            };
+
+            _rx!.ValueUpdated += _rxHandler;
+            await _rx.StartUpdatesAsync();
+
+            _log.Info("✅ BLE connected & notifications enabled.");
+            _isConnected = true;
+            return true;
         }
+
+        /// <summary>
+        /// Try common ELM327 layouts, then fall back to capability scan.
+        /// </summary>
+        private async Task<bool> DiscoverChannelsAsync()
+        {
+            // 1) Standard FFF0 (RX=FFF1 notify, TX=FFF2 write)
+            var fff0 = await _device.GetServiceAsync(Guid.Parse("0000FFF0-0000-1000-8000-00805F9B34FB"));
+            if (fff0 != null)
+            {
+                var tryRx = await fff0.GetCharacteristicAsync(Guid.Parse("0000FFF1-0000-1000-8000-00805F9B34FB"));
+                var tryTx = await fff0.GetCharacteristicAsync(Guid.Parse("0000FFF2-0000-1000-8000-00805F9B34FB"));
+                if (IsNotify(tryRx) && IsWritable(tryTx))
+                {
+                    _rx = tryRx; _tx = tryTx;
+                    _log.Info("🔎 Using service 0xFFF0 (RX=FFF1 notify, TX=FFF2 write).");
+                    return true;
+                }
+            }
+
+            // 2) HM-10 style FFE0/FFE1 (same char often does both)
+            var ffe0 = await _device.GetServiceAsync(Guid.Parse("0000FFE0-0000-1000-8000-00805F9B34FB"));
+            if (ffe0 != null)
+            {
+                var ffe1 = await ffe0.GetCharacteristicAsync(Guid.Parse("0000FFE1-0000-1000-8000-00805F9B34FB"));
+                if (IsNotify(ffe1) || IsWritable(ffe1))
+                {
+                    _rx = IsNotify(ffe1) ? ffe1 : null;
+                    _tx = IsWritable(ffe1) ? ffe1 : null;
+                    if (_rx != null && _tx != null)
+                    {
+                        _log.Info("🔎 Using service 0xFFE0 (FFE1 as RX notify + TX write).");
+                        return true;
+                    }
+                }
+            }
+
+            // 3) Fallback: scan all services/characteristics and pick Notify + Write
+            var services = await _device.GetServicesAsync();
+            foreach (var svc in services)
+            {
+                var chars = await svc.GetCharacteristicsAsync();
+                foreach (var ch in chars)
+                {
+                    if (_rx == null && IsNotify(ch)) _rx = ch;
+                    if (_tx == null && IsWritable(ch)) _tx = ch;
+                    if (_rx != null && _tx != null)
+                    {
+                        _log.Info($"🔎 Using fallback characteristics RX={_rx.Uuid}, TX={_tx.Uuid}.");
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        private static bool IsNotify(ICharacteristic? c) =>
+            c != null && (c.Properties.HasFlag(CharacteristicPropertyType.Notify) ||
+                          c.Properties.HasFlag(CharacteristicPropertyType.Indicate));
+
+        private static bool IsWritable(ICharacteristic? c) =>
+            c != null && (c.Properties.HasFlag(CharacteristicPropertyType.Write) ||
+                          c.Properties.HasFlag(CharacteristicPropertyType.WriteWithoutResponse));
 
         public async Task<bool> WriteAsync(string data)
         {
@@ -125,7 +139,8 @@ namespace CarSpec.Services.Bluetooth
 
             try
             {
-                var bytes = Encoding.ASCII.GetBytes(data + "\r");
+                // DO NOT append CR here; Elm327Adapter sends command + "\r".
+                var bytes = Encoding.ASCII.GetBytes(data);
                 await _tx.WriteAsync(bytes);
                 _log.LogDebug($"➡️ Sent: {data.Trim()}");
                 return true;
@@ -139,15 +154,22 @@ namespace CarSpec.Services.Bluetooth
 
         public async Task<string> ReadAsync()
         {
-            for (int i = 0; i < 50; i++)
+            if (!_isConnected || _rx == null)
+                return string.Empty;
+
+            // Wait up to ~8s: 80 * 100ms (aligned with Elm327Adapter timeout)
+            for (int i = 0; i < 80; i++)
             {
+                if (!_isConnected) return string.Empty;
+
                 if (_responseQueue.TryDequeue(out var response))
                     return response;
 
-                await Task.Delay(50);
+                await Task.Delay(100);
             }
 
-            _log.Warn("⚠️ No ECU data received in time.");
+            if (_isConnected)
+                _log.Warn("⚠️ No ECU data received in time.");
             return string.Empty;
         }
 
@@ -157,10 +179,18 @@ namespace CarSpec.Services.Bluetooth
             {
                 _log.Info("🔌 Disconnecting BLE...");
 
+                // Flip state first so any in-flight reads bail out quickly
+                _isConnected = false;                      // add this
+
+                // Unblock any waiting reader with a prompt sentinel
+                _responseQueue.Enqueue(">");              // add this
+
                 if (_rx != null)
                 {
                     try { _rx.StopUpdatesAsync().Wait(500); } catch { }
-                    _rx.ValueUpdated -= null;
+                    if (_rxHandler != null)
+                        _rx.ValueUpdated -= _rxHandler;
+                    _rxHandler = null;
                     _rx = null;
                 }
 
@@ -170,8 +200,7 @@ namespace CarSpec.Services.Bluetooth
                 {
                     try
                     {
-                        var bleDevice = _device;
-                        bleDevice.Dispose();
+                        _device.Dispose();
                         _log.Info($"🧹 BLE device {_device.Name} disposed.");
                     }
                     catch (Exception ex)
@@ -194,7 +223,7 @@ namespace CarSpec.Services.Bluetooth
             if (string.IsNullOrWhiteSpace(input))
                 return string.Empty;
 
-            string[] junk = { "SEARCHING", "?" };
+            string[] junk = { "SEARCHING", "?", "ELM327", "OBDII" };
             foreach (var token in junk)
             {
                 if (input.Contains(token, StringComparison.OrdinalIgnoreCase))
