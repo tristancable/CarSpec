@@ -1,6 +1,4 @@
-﻿using System.Text.Json;
-using System.Text.Json.Serialization;
-using CarSpec.Constants;
+﻿using CarSpec.Constants;
 using CarSpec.Interfaces;
 using CarSpec.Models;
 
@@ -9,113 +7,109 @@ namespace CarSpec.Services.Profiles
     public sealed class VehicleProfileService : IVehicleProfileService
     {
         private readonly IAppStorage _storage;
+        private List<VehicleProfile> _garage = new();               // NEW: user garage
         private IReadOnlyList<VehicleProfile> _all = Array.Empty<VehicleProfile>();
-
         public VehicleProfile? Current { get; private set; }
-        public IReadOnlyList<VehicleProfile> All => _all;
+        public IReadOnlyList<VehicleProfile> All => _garage;        // expose garage
 
         public VehicleProfileService(IAppStorage storage) => _storage = storage;
 
         public async Task LoadAsync()
         {
-            if (_all.Count == 0)
-                _all = await LoadCatalogAsync();
+            // Load garage (user-created)
+            _garage = await _storage.GetAsync<List<VehicleProfile>>(AppKeys.VehicleProfiles) ?? new List<VehicleProfile>();
 
-            if (Current is null)
-            {
-                // 1) Try previously saved “current” profile
-                var saved = await _storage.GetAsync<VehicleProfile>(AppKeys.VehicleProfile);
-                if (saved is not null) { Current = saved; return; }
+            // Load current selection
+            Current ??= await _storage.GetAsync<VehicleProfile>(AppKeys.VehicleProfile);
 
-                // 2) Otherwise pick the first in user “garage” if any
-                var garage = await _storage.GetAsync<List<VehicleProfile>>(AppKeys.VehicleProfiles);
-                if (garage?.Count > 0) { Current = garage[0]; return; }
-
-                // 3) Otherwise, first from catalog (if any)
-                if (_all.Count > 0) Current = _all[0];
-            }
+            // If nothing picked yet but garage has entries, pick first
+            if (Current is null && _garage.Count > 0)
+                Current = _garage[0];
         }
 
-        public void Set(VehicleProfile profile) => Current = profile; // legacy
-
-        // NEW: enumerate catalog
-        public Task<List<VehicleProfile>> GetAllAsync()
+        public async Task<List<VehicleProfile>> GetAllAsync()
         {
-            // Ensure loaded; if caller didn't call LoadAsync(), that’s okay.
-            if (_all.Count == 0)
-            {
-                return Task.Run(async () =>
-                {
-                    _all = await LoadCatalogAsync();
-                    return _all.ToList();
-                });
-            }
-            return Task.FromResult(_all.ToList());
+            await LoadAsync();
+            return _garage.ToList();
         }
 
-        // NEW: persist & set active
         public async Task SetCurrentAsync(VehicleProfile profile)
         {
+            await LoadAsync();
+
+            // Ensure profile is in garage
+            if (!_garage.Any(v => v.Id == profile.Id))
+                _garage.Add(profile);
+
             Current = profile;
-
-            // Save the current selection
-            await _storage.SetAsync(AppKeys.VehicleProfile, profile);
-
-            // Maintain a “garage” list (MRU-ish, no duplicates by composite key)
-            var garage = await _storage.GetAsync<List<VehicleProfile>>(AppKeys.VehicleProfiles)
-                         ?? new List<VehicleProfile>();
-
-            string Key(VehicleProfile v) => $"{v.Year}|{v.Make}|{v.Model}|{v.Engine}".ToUpperInvariant();
-            var key = Key(profile);
-
-            // remove any existing entry with same key
-            garage.RemoveAll(v => Key(v) == key);
-            // add to front
-            garage.Insert(0, profile);
-
-            // Optional: keep it small
-            const int MaxGarage = 12;
-            if (garage.Count > MaxGarage) garage = garage.Take(MaxGarage).ToList();
-
-            await _storage.SetAsync(AppKeys.VehicleProfiles, garage);
+            await _storage.SetAsync(AppKeys.VehicleProfile, Current);
+            await _storage.SetAsync(AppKeys.VehicleProfiles, _garage);
         }
 
-        public VehicleProfile? Find(string year, string make, string model, string? engine = null) =>
-            _all.FirstOrDefault(v =>
+        // Legacy wrapper
+        public void Set(VehicleProfile profile) => _ = SetCurrentAsync(profile);
+
+        public async Task AddAsync(VehicleProfile profile)          // NEW
+        {
+            await LoadAsync();
+
+            if (string.IsNullOrWhiteSpace(profile.Id))
+                profile.Id = Guid.NewGuid().ToString("N");
+
+            _garage.Add(profile);
+            await _storage.SetAsync(AppKeys.VehicleProfiles, _garage);
+
+            // If this is the first car, also set as Current for convenience
+            if (Current is null)
+                await SetCurrentAsync(profile);
+        }
+
+        public async Task RemoveAsync(string id)                    // NEW
+        {
+            await LoadAsync();
+
+            var idx = _garage.FindIndex(v => v.Id == id);
+            if (idx >= 0)
+            {
+                var removed = _garage[idx];
+                _garage.RemoveAt(idx);
+
+                // If we removed the current one, pick another if available
+                if (Current?.Id == removed.Id)
+                    Current = _garage.FirstOrDefault();
+
+                await _storage.SetAsync(AppKeys.VehicleProfiles, _garage);
+                await _storage.SetAsync(AppKeys.VehicleProfile, Current);
+            }
+        }
+
+        public VehicleProfile? Find(string year, string make, string model, string? engine = null)
+            => _garage.FirstOrDefault(v =>
                 string.Equals(v.Year, year, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(v.Make, make, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(v.Model, model, StringComparison.OrdinalIgnoreCase) &&
                 (string.IsNullOrWhiteSpace(engine) || string.Equals(v.Engine, engine, StringComparison.OrdinalIgnoreCase)));
 
-        // ---------- catalog loader ----------
-
-        private static async Task<IReadOnlyList<VehicleProfile>> LoadCatalogAsync()
+        public async Task LearnFromFingerprintAsync(EcuFingerprint fp)
         {
-            // Adjust path to wherever you ship vehicles.json
-            // Option A: next to your exe
-            var baseDir = AppContext.BaseDirectory;
-            var candidates = new[]
-            {
-                Path.Combine(baseDir, "vehicles.json"),
-                Path.Combine(baseDir, "wwwroot", "vehicles.json"),
-                Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "vehicles.json"),
-            };
+            await LoadAsync();
+            if (Current is null) return;
 
-            var path = candidates.FirstOrDefault(File.Exists);
-            if (path is null) return Array.Empty<VehicleProfile>();
+            if (!string.IsNullOrWhiteSpace(fp.Protocol))
+                Current.ProtocolDetected = fp.Protocol;
 
-            await using var fs = File.OpenRead(path);
-            var opts = new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true,
-                ReadCommentHandling = JsonCommentHandling.Skip,
-                AllowTrailingCommas = true,
-                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-            };
+            if (!string.IsNullOrWhiteSpace(fp.Vin))
+                Current.VinCached = fp.Vin;
 
-            var list = await JsonSerializer.DeserializeAsync<List<VehicleProfile>>(fs, opts)
-                       ?? new List<VehicleProfile>();
-            return list;
+            if (fp.SupportedPids.Count > 0)
+                Current.SupportedPidsCache = fp.SupportedPids.ToList();
+
+            await _storage.SetAsync(AppKeys.VehicleProfile, Current);
+
+            // Also update the profile inside the garage list
+            var i = _garage.FindIndex(v => v.Id == Current.Id);
+            if (i >= 0) _garage[i] = Current;
+            await _storage.SetAsync(AppKeys.VehicleProfiles, _garage);
         }
     }
 }

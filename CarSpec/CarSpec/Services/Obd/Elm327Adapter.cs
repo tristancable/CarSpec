@@ -50,6 +50,13 @@ namespace CarSpec.Services.Obd
             await _profiles.LoadAsync();
             var profile = _profiles.Current;
 
+            // If the profile has learned hints, set them early
+            if (!string.IsNullOrWhiteSpace(profile?.ProtocolDetected) && string.IsNullOrWhiteSpace(profile.ProtocolHint))
+            {
+                // Let ApplyProfileHintsAsync pick it up via ProtocolHint
+                profile.ProtocolHint = profile.ProtocolDetected;
+            }
+
             Log("🔌 Starting ELM327 connection...");
             _pidSupport.Clear();
             IsEcuAwake = false;
@@ -234,8 +241,9 @@ namespace CarSpec.Services.Obd
         /// Send a raw AT/PID command and read until prompt '>' or timeout.
         /// Serialized by a lock to prevent interleaved replies.
         /// </summary>
-        public async Task<ObdResponse> SendCommandAsync(string command, int timeoutMs = 600, bool retryStoppedOnce = true)
+        public async Task<ObdResponse> SendCommandAsync(string command, int timeoutMs = -1, bool retryStoppedOnce = true)
         {
+            if (timeoutMs < 0) timeoutMs = _pidTimeoutMs; // use adapter-tuned default
             await _ioLock.WaitAsync();
             try
             {

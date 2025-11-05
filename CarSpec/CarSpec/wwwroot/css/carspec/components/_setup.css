@@ -1,0 +1,191 @@
+﻿/* ---- Setup theme tokens ---- */
+:root {
+    /* dark defaults */
+    --setup-border: rgba(255,255,255,.14);
+    --setup-border-subtle: rgba(255,255,255,.08);
+    --setup-bg-grad-1: rgba(255,255,255,.03);
+    --setup-bg-grad-2: rgba(255,255,255,.015);
+    --setup-input-bg-1: rgba(255,255,255,.022);
+    --setup-input-bg-2: rgba(255,255,255,.012);
+    --setup-placeholder: #9fb3d9;
+    --setup-caret: #e9eef7;
+}
+
+    /* light-mode overrides (support several common switches) */
+    :root[data-theme="light"],
+    body.light,
+    .theme-light,
+    html.light,
+    [data-color-scheme="light"] {
+        --setup-border: rgba(0,0,0,.22);
+        --setup-border-subtle: rgba(0,0,0,.12);
+        --setup-bg-grad-1: rgba(0,0,0,.02);
+        --setup-bg-grad-2: rgba(0,0,0,.01);
+        --setup-input-bg-1: rgba(0,0,0,.015);
+        --setup-input-bg-2: rgba(0,0,0,.005);
+        --setup-placeholder: #6b778c;
+        --setup-caret: #1f2328;
+    }
+
+/* fallback if your app doesn't set a theme attribute */
+@media (prefers-color-scheme: light) {
+    :root:not([data-theme]) {
+        --setup-border: rgba(0,0,0,.22);
+        --setup-border-subtle: rgba(0,0,0,.12);
+        --setup-bg-grad-1: rgba(0,0,0,.02);
+        --setup-bg-grad-2: rgba(0,0,0,.01);
+        --setup-input-bg-1: rgba(0,0,0,.015);
+        --setup-input-bg-2: rgba(0,0,0,.005);
+        --setup-placeholder: #6b778c;
+        --setup-caret: #1f2328;
+    }
+}
+
+/* ——— CARD / HEADER ——— */
+.setup-card {
+    padding: 16px;
+    border: 1px solid var(--setup-border-subtle);
+    border-radius: 16px;
+    background: radial-gradient(900px 500px at 8% -10%, rgba(255,120,0,.06), transparent 55%), linear-gradient(180deg, var(--setup-bg-grad-1), var(--setup-bg-grad-2));
+    box-shadow: 0 18px 38px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06);
+}
+
+.setup-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+    border-bottom: 1px dashed var(--setup-border-subtle);
+    padding-bottom: 12px;
+}
+
+.setup-title {
+    margin: 0;
+    font-size: 20px;
+    letter-spacing: .2px;
+}
+
+.setup-sub {
+    margin: 4px 0 0;
+    opacity: .85;
+    font-size: 14px;
+    color: #9fb3d9;
+}
+
+.setup-badge {
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--setup-border-subtle);
+    background: rgba(44,62,95,.45);
+    color: #cfe2ff;
+}
+
+/* ——— GRID ——— */
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(12,1fr);
+    gap: 14px 16px;
+}
+
+.form-row {
+    grid-column: span 4;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+    .form-row.span-2 {
+        grid-column: span 8;
+    }
+
+@media (max-width:900px) {
+    .form-row, .form-row.span-2 {
+        grid-column: 1 / -1;
+    }
+}
+
+/* ——— LABELS ——— */
+.form-row label {
+    font-weight: 600;
+    font-size: 13px;
+    opacity: .95;
+    letter-spacing: .2px;
+}
+
+.form-row .hint {
+    opacity: .65;
+    font-weight: 400;
+    font-size: 12px;
+    margin-left: 6px;
+}
+
+.form-row .unit {
+    opacity: .7;
+    font-weight: 500;
+    margin-left: 6px;
+}
+
+/* ——— INPUTS (NO MARKUP CHANGES NEEDED) ——— */
+.cs-input {
+    width: 100%;
+    height: 52px;
+    padding: 0 14px;
+    border-radius: 12px;
+    border: 1px solid var(--setup-border);
+    background: linear-gradient(180deg, var(--setup-input-bg-1), var(--setup-input-bg-2));
+    caret-color: var(--setup-caret);
+    color: #e9eef7;
+    outline: none;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+    transition: border-color .18s ease, box-shadow .18s ease, background .18s ease, transform .08s ease;
+}
+
+    .cs-input::placeholder {
+        color: var(--setup-placeholder);
+        opacity: .75;
+    }
+
+    /* subtle hover + focus ring */
+    .cs-input:hover {
+        border-color: var(--setup-border);
+    }
+
+    .cs-input:focus {
+        border-color: rgba(255,120,0,.45);
+        box-shadow: 0 0 0 3px rgba(255,120,0,.18), 0 10px 26px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06);
+        background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+        transform: translateY(-1px);
+    }
+
+/* Selects should feel identical to inputs */
+.form-row select.cs-input {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    padding-right: 40px;
+    background-image: linear-gradient(180deg, var(--setup-input-bg-1), var(--setup-input-bg-2)), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%236B778C' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat,no-repeat;
+    background-position: left 0 top 0, right 12px center;
+    background-size: 100% 100%, 18px 18px;
+}
+
+/* Number inputs: hide default spinners for a cleaner look */
+input[type=number].cs-input::-webkit-outer-spin-button,
+input[type=number].cs-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+input[type=number].cs-input {
+    -moz-appearance: textfield;
+}
+
+/* ——— FOOTER ——— */
+.actions {
+    margin-top: 14px;
+    display: flex;
+    gap: 10px;
+    justify-content: flex-start;
+}

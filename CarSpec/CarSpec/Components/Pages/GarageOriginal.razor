@@ -1,4 +1,4 @@
-﻿@page "/garage"
+﻿@page "/garageoriginal"
 @using CarSpec.Models
 @using CarSpec.Constants
 @using Microsoft.AspNetCore.Components.Forms
@@ -12,12 +12,12 @@
 {
     <p>Active Vehicle: <strong>@cur.Year @cur.Make @cur.Model</strong></p>
 }
-@* else
+else
 {
     <div class="cs-card warn" style="margin-bottom:12px">
-        No cars yet. <a href="/setup">Add one</a>
+        No active vehicle selected. <a href="/garage">Choose one</a> or <a href="/setup">add a car</a>.
     </div>
-} *@
+}
 
 @if (_cars is null)
 {
@@ -25,7 +25,7 @@
 }
 else if (_cars.Count == 0)
 {
-    <div class="cs-card warn">No cars yet. <a href="/setup">Add one</a></div>
+    <div class="cs-card warn">No cars yet. <a href="/setup">Add one</a>.</div>
 }
 else
 {
@@ -148,15 +148,21 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        // Ensure Profiles.Current is loaded from storage
         await Profiles.LoadAsync();
-        // Pull from the profile service (user garage)
-        _cars = await Profiles.GetAllAsync();
 
-        // If empty, seed from Current once (keeps your original behavior)
-        if (_cars.Count == 0 && Profiles.Current is VehicleProfile cur && !string.IsNullOrWhiteSpace(cur.Model))
+        _cars = await Storage.GetAsync<List<VehicleProfile>>(AppKeys.VehicleProfiles)
+                ?? new List<VehicleProfile>();
+
+        // Seed once from current profile if list is empty
+        if (_cars.Count == 0)
         {
-            await Profiles.AddAsync(cur);
-            _cars = await Profiles.GetAllAsync();
+            var current = await Storage.GetAsync<VehicleProfile>(AppKeys.VehicleProfile);
+            if (current is not null && !_cars.Any(v => SameCar(v, current)))
+            {
+                _cars.Add(current);
+                await Storage.SetAsync(AppKeys.VehicleProfiles, _cars);
+            }
         }
     }
 
@@ -164,8 +170,9 @@ else
 
     private async Task MakeActive(VehicleProfile v)
     {
-        await Profiles.SetCurrentAsync(v);
+        await Storage.SetAsync(AppKeys.VehicleProfile, v);
         await Storage.SetAsync(AppKeys.SetupCompleted, true);
+        Profiles.Set(v); // keep memory Current in sync
         StateHasChanged();
     }
 
@@ -174,11 +181,11 @@ else
         _editingKey = KeyOf(v);
         _edit = new EditDto
         {
-            PreferredTransport = string.IsNullOrWhiteSpace(v.PreferredTransport) ? "BLE" : v.PreferredTransport!,
+            PreferredTransport   = string.IsNullOrWhiteSpace(v.PreferredTransport) ? "BLE" : v.PreferredTransport,
             PreferredAdapterName = v.PreferredAdapterName,
-            TachMaxRpm = v.TachMaxRpm,
-            TachRedlineStart = v.TachRedlineStart,
-            SpeedMaxMph = v.SpeedMaxMph
+            TachMaxRpm           = v.TachMaxRpm,
+            TachRedlineStart     = v.TachRedlineStart,
+            SpeedMaxMph          = v.SpeedMaxMph
         };
     }
 
@@ -192,44 +199,40 @@ else
     {
         if (_cars is null) return;
 
-        // Upsert: rebuild a new VehicleProfile preserving identity-ish fields
+        // Build a NEW VehicleProfile (init-only props)
         var updated = new VehicleProfile
         {
-            Id = string.IsNullOrWhiteSpace(original.Id) ? Guid.NewGuid().ToString("N") : original.Id,
             Year = original.Year,
             Make = original.Make,
             Model = original.Model,
             Engine = original.Engine,
 
-            PreferredTransport = _edit.PreferredTransport,
+            PreferredTransport   = _edit.PreferredTransport,
             PreferredAdapterName = _edit.PreferredAdapterName,
 
             ProtocolHint = original.ProtocolHint,
-            ProtocolDetected = original.ProtocolDetected,
             InitScript = original.InitScript?.ToList() ?? new(),
             DesiredMode01Pids = original.DesiredMode01Pids?.ToList() ?? new(),
-            SupportedPidsCache = original.SupportedPidsCache?.ToList(),
-            VinCached = original.VinCached,
 
             TachMaxRpm = _edit.TachMaxRpm,
             TachRedlineStart = _edit.TachRedlineStart,
             SpeedMaxMph = _edit.SpeedMaxMph
         };
 
-        // Replace in local list by Y/M/M (your original key)
+        // Replace in garage list
         var i = _cars.FindIndex(c => SameCar(c, original));
         if (i >= 0) _cars[i] = updated;
 
-        // Persist via storage directly (keeps original behavior),
-        // plus keep service in sync by resetting the whole list.
+        // Persist garage
         await Storage.SetAsync(AppKeys.VehicleProfiles, _cars);
-        if (Profiles.Current is not null && SameCar(Profiles.Current, original))
-        {
-            await Profiles.SetCurrentAsync(updated);
-        }
 
-        // Also refresh service’s in-memory garage
-        await Profiles.LoadAsync();
+        // If this was the active car, update active storage too
+        var current = await Storage.GetAsync<VehicleProfile>(AppKeys.VehicleProfile);
+        if (current is not null && SameCar(current, original))
+        {
+            await Storage.SetAsync(AppKeys.VehicleProfile, updated);
+            Profiles.Set(updated);
+        }
 
         CancelEdit();
         StateHasChanged();
@@ -242,41 +245,31 @@ else
     {
         if (_cars is null) return;
 
-        // Remove from service (preferred)
-        // If your service doesn’t have Remove by Y/M/M, use Id when available
-        if (!string.IsNullOrWhiteSpace(v.Id))
-        {
-            await Profiles.RemoveAsync(v.Id);
-        }
-        else
-        {
-            // fallback: manual prune + persist (matches your original logic)
-            _cars.RemoveAll(x => SameCar(x, v));
-            await Storage.SetAsync(AppKeys.VehicleProfiles, _cars);
-        }
+        _cars.RemoveAll(x => SameCar(x, v));
+        await Storage.SetAsync(AppKeys.VehicleProfiles, _cars);
 
-        // If we deleted the active one, pick another (original behavior)
-        if (Profiles.Current is not null && SameCar(Profiles.Current, v))
+        var current = await Storage.GetAsync<VehicleProfile>(AppKeys.VehicleProfile);
+        if (current is not null && SameCar(current, v))
         {
-            var fresh = await Profiles.GetAllAsync();
-            if (fresh.Count > 0)
+            await Storage.RemoveAsync(AppKeys.VehicleProfile);
+            await Storage.RemoveAsync(AppKeys.SetupCompleted);
+
+            if (_cars.Count > 0)
             {
-                await Profiles.SetCurrentAsync(fresh[0]);
+                var next = _cars[0];
+                await Storage.SetAsync(AppKeys.VehicleProfile, next);
                 await Storage.SetAsync(AppKeys.SetupCompleted, true);
+                Profiles.Set(next);
             }
             else
             {
                 Profiles.Set(new VehicleProfile());
-                await Storage.RemoveAsync(AppKeys.VehicleProfile);
-                await Storage.RemoveAsync(AppKeys.SetupCompleted);
             }
         }
 
-        // Reload for UI
-        _cars = await Profiles.GetAllAsync();
         StateHasChanged();
     }
 
     private static string DisplayTransport(string? t)
-        => string.IsNullOrWhiteSpace(t) ? "BLE" : t!;
+        => string.IsNullOrWhiteSpace(t) ? "BLE" : t;
 }

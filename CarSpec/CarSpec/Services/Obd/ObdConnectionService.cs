@@ -95,7 +95,6 @@ namespace CarSpec.Services.Obd
                 // >>> ECU is awake here <<<
 
                 // 1) Immediately notify UI with whatever the adapter already has
-                //    (ConnectAsync inside Elm327Adapter sets LastFingerprint after 4100 succeeds)
                 OnFingerprint?.Invoke(_adapter.LastFingerprint);
 
                 // 2) Build high-level service and flip to live
@@ -103,8 +102,7 @@ namespace CarSpec.Services.Obd
                 SimulationMode = false;
                 Log("✅ Live OBD connected.");
 
-                // 3) (Optional) If adapter did not populate a fingerprint yet, read it now,
-                //    then notify UI again with the fresh data.
+                // 3) Ensure we have a fingerprint, notify UI, match profile… and LEARN
                 try
                 {
                     _lastFp = _adapter.LastFingerprint ?? await _adapter.ReadFingerprintAsync();
@@ -113,7 +111,23 @@ namespace CarSpec.Services.Obd
                     if (_lastFp?.Vin != null)
                         Log($"🪪 VIN: {_lastFp.Vin} (Year≈{_lastFp.Year?.ToString() ?? "?"}, Protocol={_lastFp.Protocol})");
 
+                    // --------- CHANGES START: learn & stamp transport ----------
                     await _profiles.LoadAsync();
+                    if (_profiles.Current is VehicleProfile cur && _lastFp is not null)
+                    {
+                        // If user didn’t set a transport in setup, stamp what we actually used
+                        if (string.IsNullOrWhiteSpace(cur.PreferredTransport))
+                        {
+                            cur.PreferredTransport = "BLE"; // we connected via BLE path
+                            await _profiles.SetCurrentAsync(cur); // persist that field
+                        }
+
+                        // Cache protocol/VIN/supported PIDs/etc for faster next time
+                        await _profiles.LearnFromFingerprintAsync(_lastFp);
+                    }
+                    // --------- CHANGES END ----------
+
+                    // Optional: suggest switching to a better-matching profile
                     var catalog = await _profiles.GetAllAsync();
                     if (_lastFp is not null && catalog is { Count: > 0 })
                     {
@@ -208,11 +222,21 @@ namespace CarSpec.Services.Obd
                 if (_obdService == null)
                     _obdService = new ObdService(_adapter);
 
-                if (_obdService == null) _obdService = new ObdService(_adapter);
-                _lastFp = _adapter.LastFingerprint ?? await _adapter.ReadFingerprintAsync();
+                try
+                {
+                    _lastFp = _adapter.LastFingerprint ?? await _adapter.ReadFingerprintAsync();
 
-                if (_lastFp?.Vin != null)
-                    Log($"🪪 VIN: {_lastFp.Vin} (Year≈{_lastFp.Year?.ToString() ?? "?"}, Protocol={_lastFp.Protocol})");
+                    if (_lastFp?.Vin != null)
+                        Log($"🪪 VIN: {_lastFp.Vin} (Year≈{_lastFp.Year?.ToString() ?? "?"}, Protocol={_lastFp.Protocol}, PIDs={_lastFp.SupportedPids.Count})");
+
+                    // Persist to the active profile for faster subsequent connects
+                    if (_lastFp is not null)
+                        await _profiles.LearnFromFingerprintAsync(_lastFp);
+                }
+                catch (Exception ex)
+                {
+                    Log($"ℹ️ Fingerprint caching skipped: {ex.Message}");
+                }
 
                 await _profiles.LoadAsync();
                 var all = await _profiles.GetAllAsync();
@@ -277,7 +301,13 @@ namespace CarSpec.Services.Obd
             await EnsureCapabilitiesAsync();
             var profile = _profiles.Current;
 
-            // Build desired list (same as you already do)
+            // Build a single "supported" set: live map if present, else cached from profile
+            var supported = (_supportedPids.Count > 0)
+                ? _supportedPids
+                : (profile?.SupportedPidsCache?.ToHashSet(StringComparer.OrdinalIgnoreCase)
+                    ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+            // Build desired list
             var desired = (profile?.DesiredMode01Pids ?? new List<string>())
                 .Where(p => !string.IsNullOrWhiteSpace(p))
                 .Select(p => p.Trim().ToUpperInvariant())
@@ -287,10 +317,15 @@ namespace CarSpec.Services.Obd
             if (desired.Count == 0)
                 desired = new() { "010C", "0111", "010D", "0105", "010F", "012F", "015C" };
 
+            // Keep only PIDs we can parse
             desired = desired.Where(pid => _registry.TryCreate(pid, out _)).ToList();
-            desired = (_supportedPids.Count > 0)
-                ? desired.Where(pid => _supportedPids.Contains(pid)).ToList()
-                : desired.Where(pid => _adapter!.SupportsPid(pid)).ToList();
+
+            // Filter using the unified "supported" set. If we don't have one, probe via adapter.
+            // ★ CHANGED: removed the duplicate filter that re-did this step.
+            if (supported.Count > 0)
+                desired = desired.Where(pid => supported.Contains(pid)).ToList();
+            else
+                desired = desired.Where(pid => _adapter!.SupportsPid(pid)).ToList();
 
             if (desired.Count == 0)
             {
@@ -302,27 +337,21 @@ namespace CarSpec.Services.Obd
             }
 
             // ----- GROUPS -----
-            // Fast group: keep these aligned (RPM + TPS + Speed).
-            var fast = desired.Intersect(new[] { "010C", "0111", "010D" }).ToList();
-            // Medium cadence: temps (coolant, IAT).
-            var medium = desired.Intersect(new[] { "0105", "010F" }).ToList();
-            // Slow cadence: fuel level, oil temp (often slow/unsupported).
-            var slow = desired.Intersect(new[] { "012F", "015C" }).ToList();
+            var fast = desired.Intersect(new[] { "010C", "0111", "010D" }).ToList(); // RPM/TPS/Speed
+            var medium = desired.Intersect(new[] { "0105", "010F" }).ToList();         // Coolant/IAT
+            var slow = desired.Intersect(new[] { "012F", "015C" }).ToList();         // Fuel/Oil
 
-            // Anything left (if user added custom) goes to medium by default.
             var remaining = desired.Except(fast.Concat(medium).Concat(slow)).ToList();
             medium.AddRange(remaining);
 
-            // Publish plan so the UI knows which tiles to render
             CurrentPollPlan = desired.ToList();
             Log($"📋 Poll plan → fast[{string.Join(",", fast)}], medium[{string.Join(",", medium)}], slow[{string.Join(",", slow)}]");
 
-            // Cadences (tune to taste)
-            var fastInterval = TimeSpan.FromMilliseconds(120);  // target “frame rate” for RPM/TPS/Speed
+            // Cadences
+            var fastInterval = TimeSpan.FromMilliseconds(120);
             var medInterval = TimeSpan.FromMilliseconds(300);
             var slowInterval = TimeSpan.FromMilliseconds(900);
 
-            // Tiny spacing to avoid frame glomming; keep intra-group gap small
             const int gapFastMs = 12;
             const int gapMedMs = 18;
             const int gapSlowMs = 22;
@@ -333,26 +362,28 @@ namespace CarSpec.Services.Obd
 
             _noDataStrikes.Clear();
 
-            CarData? _last = _lastSnapshot; // use your cache to prevent flicker
+            CarData? _last = _lastSnapshot;
 
             async Task PollGroupAsync(List<string> group, CarData snap, int gapMs)
             {
                 foreach (var pid in group.ToList())
                 {
                     if (!_registry.TryCreate(pid, out var datum)) continue;
-                    var resp = await _adapter!.SendCommandAsync(pid, timeoutMs: 1200, retryStoppedOnce: true);
+
+                    // ★ CHANGED: honor adapter/profile-tuned timeout
+                    var resp = await _adapter!.SendCommandAsync(pid, timeoutMs: _pidTimeoutMs, retryStoppedOnce: true);
                     var raw = (resp.RawResponse ?? string.Empty).ToUpperInvariant();
 
                     if (string.IsNullOrWhiteSpace(raw) || raw.Contains("NO DATA") || raw.Contains("?"))
                     {
                         var strikes = _noDataStrikes.TryGetValue(pid, out var s) ? s + 1 : 1;
                         _noDataStrikes[pid] = strikes;
+
                         if (strikes >= NoDataStrikeLimit)
                         {
-                            // Disable for this session; also remove from groups
                             fast.Remove(pid); medium.Remove(pid); slow.Remove(pid);
-                            var newPlan = fast.Concat(medium).Concat(slow).ToList();
-                            CurrentPollPlan = newPlan;
+                            // ★ OPTIONAL: refresh published plan so UI can hide tiles
+                            CurrentPollPlan = fast.Concat(medium).Concat(slow).ToList();
                             Log($"⏭️ Disabling {pid} (no data {strikes}x).");
                         }
                     }
@@ -381,7 +412,7 @@ namespace CarSpec.Services.Obd
 
                     var now = DateTime.UtcNow;
 
-                    // Start by carrying forward last snapshot (prevents 0 flicker)
+                    // Carry forward last snapshot (prevents 0 flicker)
                     var snap = _last is null ? new CarData() : new CarData
                     {
                         RPM = _last.RPM,
@@ -396,7 +427,6 @@ namespace CarSpec.Services.Obd
 
                     bool didFast = false;
 
-                    // FAST group – always if interval elapsed
                     if (fast.Count > 0 && (now - lastFast) >= fastInterval)
                     {
                         await PollGroupAsync(fast, snap, gapFastMs);
@@ -404,21 +434,19 @@ namespace CarSpec.Services.Obd
                         didFast = true;
                     }
 
-                    // MEDIUM group – only when its own interval elapses
                     if (medium.Count > 0 && (now - lastMed) >= medInterval)
                     {
                         await PollGroupAsync(medium, snap, gapMedMs);
                         lastMed = DateTime.UtcNow;
                     }
 
-                    // SLOW group – less frequent
                     if (slow.Count > 0 && (now - lastSlow) >= slowInterval)
                     {
                         await PollGroupAsync(slow, snap, gapSlowMs);
                         lastSlow = DateTime.UtcNow;
                     }
 
-                    // Only publish after FAST group to keep RPM/TPS aligned in the same tick
+                    // Publish after FAST to keep RPM/TPS aligned
                     if (didFast)
                     {
                         _lastSnapshot = snap;
@@ -426,7 +454,6 @@ namespace CarSpec.Services.Obd
                         onData?.Invoke(snap);
                     }
 
-                    // Small idle to avoid spinning if fast interval is very low
                     try { await Task.Delay(15, token); } catch { break; }
                 }
             }
@@ -445,26 +472,8 @@ namespace CarSpec.Services.Obd
             await _profiles.LoadAsync();
             var profile = _profiles.Current;
 
-            var transport = (profile?.PreferredTransport ?? "BLE").Trim().ToUpperInvariant();
-            if (string.IsNullOrWhiteSpace(transport)) transport = "BLE";
-
-            switch (transport)
-            {
-                case "BLE":
-                    return await TryEnsureBleAdapterAsync(profile);
-
-                case "WIFI":
-                case "WI-FI":
-                case "WI_FI":
-                case "USB":
-                case "SERIAL":
-                    Log($"ℹ️ Requested transport '{transport}' not implemented yet — falling back to BLE.");
-                    return await TryEnsureBleAdapterAsync(profile);
-
-                default:
-                    Log($"ℹ️ Unknown transport '{transport}' — falling back to BLE.");
-                    return await TryEnsureBleAdapterAsync(profile);
-            }
+            // We currently support BLE only (Wi-Fi/USB not wired up yet)
+            return await TryEnsureBleAdapterAsync(profile);
         }
 
         private async Task<bool> TryEnsureBleAdapterAsync(VehicleProfile? profile)
@@ -487,8 +496,8 @@ namespace CarSpec.Services.Obd
             // 2) Common patterns
             if (device == null)
             {
-                var pairs = new (string a, string b)[] { ("VEEPEAK", "OBD"), ("OBDII", "ELM"), ("V-LINK", "OBD") };
-                foreach (var (a, b) in pairs)
+                var patterns = new (string a, string b)[] { ("VEEPEAK", "OBD"), ("OBDII", "ELM"), ("V-LINK", "OBD") };
+                foreach (var (a, b) in patterns)
                 {
                     device = await _bluetooth.FindDeviceAsync(a, b);
                     if (device != null)
