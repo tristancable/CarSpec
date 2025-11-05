@@ -1,0 +1,34 @@
+﻿/* Numbers tiles */
+.cs-metric .metric {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+    .cs-metric .metric .value {
+        font-family: var(--cs-font);
+        font-size: 28px;
+        line-height: 1;
+        letter-spacing: .8px;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .cs-metric .metric .unit {
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: .3px;
+    }
+
+    /* Optional state colors for temp tiles */
+    .cs-metric .metric.good .value {
+        color: #25d366;
+    }
+
+    .cs-metric .metric.warn .value {
+        color: #f2c94c;
+    }
+
+    .cs-metric .metric.bad .value {
+        color: #ff4d4f;
+    }

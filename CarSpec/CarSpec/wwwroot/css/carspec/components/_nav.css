@@ -1,0 +1,54 @@
+﻿.cs-nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 10px 16px;
+    backdrop-filter: blur(var(--cs-blur));
+    background: var(--nav-bg);
+    border-bottom: 1px solid var(--card-border);
+    box-shadow: 0 10px 25px -20px var(--cs-shadow);
+}
+
+    .cs-nav a, .cs-nav .nav-link, .cs-nav .cs-btn--link {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 10px;
+        color: var(--nav-link);
+        background: transparent;
+        border: 0;
+        cursor: pointer;
+        transition: color .15s,text-shadow .15s,transform .15s;
+        appearance: none;
+    }
+
+        .cs-nav a:visited {
+            color: var(--nav-link);
+        }
+
+        .cs-nav a:hover, .cs-nav .nav-link:hover, .cs-nav .cs-btn--link:hover {
+            color: var(--nav-link-hover);
+            text-shadow: 0 0 8px var(--nav-link-glow);
+            transform: translateY(-1px);
+            text-decoration: none;
+        }
+
+        .cs-nav a:focus-visible, .cs-nav .nav-link:focus-visible, .cs-nav .cs-btn--link:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 2px var(--ring);
+            text-decoration: none;
+        }
+
+    .cs-nav .cs-btn:not(.primary) {
+        color: var(--nav-link);
+    }
+
+        .cs-nav .cs-btn:not(.primary):hover {
+            color: var(--nav-link-hover);
+            border-color: var(--btn-hover-border);
+            box-shadow: 0 0 0 1px var(--btn-hover-border);
+        }

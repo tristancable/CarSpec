@@ -20,14 +20,11 @@ namespace CarSpec.Services.Obd
             "ATH0",     // Headers off
             "ATSP 0",   // Auto protocol
             "ATSI",     // Start slow init (for ISO 9141-2)
-            "ATST FF",  // Extend timeout (Subaru ECUs are slow)
+            "ATST FF",  // Extend timeout (some ECUs are slow)
             "0100"      // Query supported PIDs (wake ECU)
         };
 
-        public ObdService(Elm327Adapter adapter)
-        {
-            _adapter = adapter;
-        }
+        public ObdService(Elm327Adapter adapter) => _adapter = adapter;
 
         public async Task<bool> InitializeAsync()
         {
@@ -57,96 +54,49 @@ namespace CarSpec.Services.Obd
                 _log.Info($"✅ ECU communication confirmed → {check.RawResponse}");
                 return true;
             }
-            else
-            {
-                _log.Warn($"⚠️ ECU not responding properly → {check.RawResponse}");
-                return false;
-            }
+
+            _log.Warn($"⚠️ ECU not responding properly → {check.RawResponse}");
+            return false;
         }
 
         public async Task<CarData> GetLatestDataAsync()
         {
-            var rpmResp = await _adapter.SendCommandAsync("010C");
-            await Task.Delay(300); // wait between reads
-
-            var speedResp = await _adapter.SendCommandAsync("010D");
+            var r010C = await _adapter.SendCommandAsync("010C"); // RPM
             await Task.Delay(300);
+            var r010D = await _adapter.SendCommandAsync("010D"); // Speed
+            await Task.Delay(300);
+            var r0111 = await _adapter.SendCommandAsync("0111"); // Throttle %
+            await Task.Delay(300);
+            var r012F = await _adapter.SendCommandAsync("012F"); // Fuel %
+            await Task.Delay(300);
+            var r0105 = await _adapter.SendCommandAsync("0105"); // Coolant °C → °F
+            await Task.Delay(300);
+            var r010F = await _adapter.SendCommandAsync("010F"); // IAT °C → °F
+            await Task.Delay(300);
+            var r015C = await _adapter.SendCommandAsync("015C"); // Oil °C → °F (may be unsupported)
 
-            double rpm = ParseRpm(rpmResp.RawResponse);
-            double speed = ParseSpeed(speedResp.RawResponse);
-
-            _log.Info($"📈 Live Data → RPM: {rpm:F0}, Speed: {speed:F1} mph");
-
-            return new CarData
+            var cd = new CarData
             {
-                RPM = rpm,
-                Speed = speed,
+                RPM = ObdParser.ParseRpm(r010C.RawResponse),
+                Speed = ObdParser.ParseSpeedMph(r010D.RawResponse),
+                ThrottlePercent = ObdParser.ParseThrottlePercent(r0111.RawResponse),
+                FuelLevelPercent = ObdParser.ParseFuelLevelPercent(r012F.RawResponse),
+                CoolantTempF = ObdParser.ParseCoolantF(r0105.RawResponse),
+                IntakeTempF = ObdParser.ParseIntakeF(r010F.RawResponse),
+                OilTempF = ObdParser.ParseOilF(r015C.RawResponse),
                 LastUpdated = DateTime.Now
             };
-        }
 
-        private double ParseRpm(string raw)
-        {
-            if (raw.Contains("41 0C"))
-            {
-                var parts = raw.Split(' ')
-                    .Where(p => p.Length == 2 && int.TryParse(p, System.Globalization.NumberStyles.HexNumber, null, out _))
-                    .Select(p => Convert.ToInt32(p, 16))
-                    .ToArray();
+            _log.Info($"📈 Live Data → " +
+                      $"RPM: {cd.RPM:F0}, " +
+                      $"Speed: {cd.Speed:F0} mph, " +
+                      $"TPS: {cd.ThrottlePercent:F1}%, " +
+                      $"Fuel: {cd.FuelLevelPercent:F1}%, " +
+                      $"Coolant: {cd.CoolantTempF:F0}°F, " +
+                      $"IAT: {cd.IntakeTempF:F0}°F, " +
+                      $"Oil: {cd.OilTempF:F0}°F");
 
-                if (parts.Length >= 4)
-                {
-                    int A = parts[2];
-                    int B = parts[3];
-                    return (A * 256 + B) / 4.0;
-                }
-            }
-            return 0;
-        }
-
-        private double ParseSpeed(string raw)
-        {
-            if (raw.Contains("41 0D"))
-            {
-                var parts = raw.Split(' ')
-                    .Where(p => p.Length == 2 && int.TryParse(p, System.Globalization.NumberStyles.HexNumber, null, out _))
-                    .Select(p => Convert.ToInt32(p, 16))
-                    .ToArray();
-
-                if (parts.Length >= 3)
-                {
-                    int A = parts[2];
-                    return A * 0.621371; // km/h → mph
-                }
-            }
-            return 0;
-        }
-
-        private async Task<double> GetPidAsync(string pid, string expectedHeader)
-        {
-            var response = await _adapter.SendCommandAsync(pid);
-
-            if (string.IsNullOrWhiteSpace(response.RawResponse))
-            {
-                _log.Warn($"⚠️ Empty response for PID {pid}");
-                return 0;
-            }
-
-            if (!response.RawResponse.Contains(expectedHeader))
-            {
-                _log.Warn($"⚠️ No ECU data (engine likely off or ECU asleep) — PID {pid} → {response.RawResponse}");
-                return 0;
-            }
-
-            try
-            {
-                return ObdParser.ParsePidValue(pid, response.RawResponse);
-            }
-            catch (Exception ex)
-            {
-                _log.Error($"Failed to parse PID {pid}: {ex.Message}");
-                return 0;
-            }
+            return cd;
         }
     }
 }

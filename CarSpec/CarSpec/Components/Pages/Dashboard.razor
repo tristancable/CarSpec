@@ -1,109 +1,259 @@
 ﻿@page "/"
 @page "/dashboard"
 @using CarSpec.Models
+@using CarSpec.Utils
 @inject CarSpec.Services.Obd.ObdConnectionService ObdService
 @inject IJSRuntime JS
+@inject CarSpec.Interfaces.IVehicleProfileService Profiles
+@inject NavigationManager Nav
+@inject CarSpec.Interfaces.IAppStorage Storage
 @implements IAsyncDisposable
 
-<h1 class="cs-title" style="font-size:26px;margin:6px 0 12px">🚗 CarSpec Dashboard</h1>
+<div class="container">
+    <h1 class="cs-title" style="font-size:26px;margin:6px 0 12px">CarSpec Dashboard</h1>
 
-<div class="cs-controls">
-  <div class="cs-badge cs-badge--panel">
-    <span class="label">Mode:</span>
-    <span class="cs-pill @(GetModeClass())">@GetModeText()</span>
-  </div>
-
-  @if (!ObdService.IsAdapterConnected)
-  {
-      <button class="cs-btn primary" @onclick="SwitchToLive">
-          🔌 Connect to OBD
-      </button>
-  }
-  else if (ObdService.IsAdapterConnected && !ObdService.IsEcuConnected)
-  {
-      <button class="cs-btn btn-secondary" @onclick="ReconnectEcu">
-          🔁 Reconnect ECU
-      </button>
-      <button class="cs-btn btn-secondary" @onclick="Disconnect">
-            🔌 Disconnect OBD
-      </button>
-  }
-  else if (ObdService.IsEcuConnected)
-  {
-      <button class="cs-btn btn-secondary" @onclick="Disconnect">
-            🔌 Disconnect OBD
-      </button>
-  }
-</div>
-
-@if (carData is null)
-{
-    <p>Waiting for data...</p>
-}
-else
-{
-    <div class="cs-grid" style="margin-bottom:18px">
-        <!-- RPM Gauge -->
-        <section class="cs-card wide">
-          <h3>RPM</h3>
-          <div style="display:grid;place-items:center">
-            <div class="gauge-host">
-              <canvas id="rpmGauge" width="280" height="280" style="display:block;"></canvas>
+    @if (_needsSetup)
+    {
+        <div class="cs-card warn" style="margin-bottom:12px; display:flex; align-items:center; justify-content:space-between;">
+            <div>
+                <strong>Vehicle setup required</strong>
+                <div style="opacity:.85">Pick your car and adapter so we can use the right PIDs and connection options.</div>
             </div>
-          </div>
+            <div>
+                <button class="cs-btn primary" type="button" @onclick="RunSetup">
+                    ⚙️ Run Setup
+                </button>
+            </div>
+        </div>
+    }
+
+    <div class="cs-controls" style="justify-content:space-between;">
+        <div style="display:flex;gap:16px;align-items:center;">
+            <div class="cs-badge cs-badge--panel">
+                <span class="label">Mode:</span>
+                <span class="cs-pill @(GetModeClass())">@GetModeText()</span>
+            </div>
+
+            @if (!ObdService.IsAdapterConnected)
+            {
+                <button class="cs-btn primary" @onclick="SwitchToLive" disabled="@_needsSetup">
+                    🔌 Connect to OBD
+                </button>
+            }
+            else if (ObdService.IsAdapterConnected && !ObdService.IsEcuConnected)
+            {
+                <button class="cs-btn btn-secondary" @onclick="ReconnectEcu" disabled="@_needsSetup">
+                    🔁 Reconnect ECU
+                </button>
+                <button class="cs-btn btn-secondary" @onclick="Disconnect" disabled="@_needsSetup">
+                    🔌 Disconnect OBD
+                </button>
+            }
+            else if (ObdService.IsEcuConnected)
+            {
+                <button class="cs-btn btn-secondary" @onclick="Disconnect" disabled="@_needsSetup">
+                    🔌 Disconnect OBD
+                </button>
+            }
+        </div>
+
+        <div class="cs-seg-icons" role="tablist" aria-label="Display mode">
+            <button class="seg @( _view == DisplayMode.Gauges ? "active" : null )"
+                    @onclick="() => SwitchView(DisplayMode.Gauges)"
+                    title="Gauges" aria-pressed="@(_view == DisplayMode.Gauges)">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 3a9 9 0 0 0-9 9h2a7 7 0 1 1 14 0h2a9 9 0 0 0-9-9z"
+                          fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                    <path d="M12 13l4.2-4.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                    <circle cx="12" cy="13" r="1.6" fill="currentColor" />
+                </svg>
+            </button>
+
+            <button class="seg @( _view == DisplayMode.Numbers ? "active" : null )"
+                    @onclick="() => SwitchView(DisplayMode.Numbers)"
+                    title="Numbers" aria-pressed="@(_view == DisplayMode.Numbers)">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 8h16M4 16h16M8 4v16M16 4v16"
+                          fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    @if (ObdService.IsEcuConnected)
+    {
+        var fp = ObdService.LastFingerprint;
+        <section class="cs-card" style="margin:12px 0">
+            <h3>ECU ID</h3>
+            <div>VIN: <strong>@(fp?.Vin ?? "—")</strong></div>
+            <div>Protocol: <strong>@(string.IsNullOrWhiteSpace(fp?.Protocol) ? "—" : fp!.Protocol)</strong></div>
+            <div>Year (from VIN): <strong>@(fp?.Year?.ToString() ?? "—")</strong></div>
+            <div>Supported PIDs: <strong>@(fp?.SupportedPids?.Count.ToString() ?? "—")</strong></div>
         </section>
+    }
 
-        <!-- Drive stats -->
-        <section class="cs-card">
-            <h3>Drive</h3>
-            <div class="cs-stat">
-                <span class="label">Speed</span>
-                <span class="value">@carData.Speed mph</span>
-            </div>
-            <div class="cs-stat">
-                <span class="label">RPM</span>
-                <span class="value">@carData.RPM rpm</span>
-            </div>
-            <div class="cs-stat good">
-                <span class="label">Throttle</span>
-                <span class="value">@carData.ThrottlePercent %</span>
-            </div>
-            <div class="cs-stat warn">
-                <span class="label">Fuel Level</span>
-                <span class="value">@carData.FuelLevelPercent %</span>
-            </div>
-        </section>
+    @if (carData is null)
+    {
+        <p>Waiting for data...</p>
+    }
+    else
+    {
+        @* When ECU is connected and we already know the poll plan, show the UI *@
+        @if (ObdService.IsEcuConnected && _planKnown)
+        {
+            <div class="cs-grid @( _view == DisplayMode.Gauges ? "" : "is-hidden")" style="margin-bottom:18px">
+                <!-- Gauges -->
+                @if (CanShow(PID_RPM))
+                {
+                    <section class="cs-card"> @* RPM *@
+                            <h3>RPM</h3><div class="gauge-host"><canvas id="rpmGauge"></canvas></div>
+                    </section>
+                }
 
-        <!-- Temps -->
-        <section class="cs-card">
-            <h3>Temps</h3>
-            <div class="cs-stat @(carData.CoolantTempF > 220 ? "bad" : "good")">
-                <span class="label">Coolant</span>
-                <span class="value">@carData.CoolantTempF °F</span>
-            </div>
-            <div class="cs-stat">
-                <span class="label">Oil</span>
-                <span class="value">@carData.OilTempF °F</span>
-            </div>
-            <div class="cs-stat">
-                <span class="label">Intake Air</span>
-                <span class="value">@carData.IntakeTempF °F</span>
-            </div>
-            <div class="cs-stat">
-                <span class="label">Last Updated</span>
-                <span class="value">@carData.LastUpdated.ToLongTimeString()</span>
-            </div>
-        </section>
+                @if (CanShow(PID_SPEED))
+                {
+                    <section class="cs-card"> @* Speed *@
+                            <h3>Speed</h3><div class="gauge-host"><canvas id="speedGauge"></canvas></div>
+                    </section>
+                  }
 
-        <!-- Log -->
+                @if (CanShow(PID_TPS))
+                {
+                    <section class="cs-card"> @* Throttle *@
+                            <h3>Throttle</h3><div class="gauge-host"><canvas id="throttleGauge"></canvas></div>
+                    </section>
+                 }
+
+                @if (CanShow(PID_FUEL))
+                {
+                    <section class="cs-card">
+                        <h3>Fuel</h3>
+                        <div class="gauge-host"><canvas id="fuelGauge"></canvas></div>
+                    </section>
+                }
+
+                @if (CanShow(PID_COOLANT))
+                {
+                    <section class="cs-card"> @* Coolant *@
+                            <h3>Coolant</h3><div class="gauge-host"><canvas id="coolantGauge"></canvas></div>
+                    </section>
+                }
+
+                @if (CanShow(PID_OIL))
+                {
+                    <section class="cs-card"> @* Oil Temp *@
+                            <h3>Oil Temp</h3><div class="gauge-host"><canvas id="oilGauge"></canvas></div>
+                    </section>
+                }
+
+                @if (CanShow(PID_IAT))
+                {
+                    <section class="cs-card"> @* Intake Air *@
+                            <h3>Intake Air</h3><div class="gauge-host"><canvas id="iatGauge"></canvas></div>
+                    </section>
+                }
+            </div>
+
+            @* === NUMBERS VIEW === *@
+            <div class="cs-grid @( _view == DisplayMode.Numbers ? "" : "is-hidden")" style="margin-bottom:18px">
+                @if (CanShow(PID_RPM))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>RPM</h3>
+                        <div class="metric @RpmClass(carData?.RPM)">
+                            <span class="value">@FormatInt(carData?.RPM)</span>
+                            <span class="unit">rpm</span>
+                        </div>
+                    </section>
+                }
+
+                @if (CanShow(PID_SPEED))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Speed</h3>
+                        <div class="metric @SpeedClass(carData?.Speed)">
+                            <span class="value">@FormatInt(carData?.Speed)</span>
+                            <span class="unit">mph</span>
+                        </div>
+                    </section>
+                }
+
+                @if (CanShow(PID_TPS))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Throttle</h3>
+                        <div class="metric @ThrottleClass(carData?.ThrottlePercent)">
+                            <span class="value">@FormatInt(carData?.ThrottlePercent)</span>
+                            <span class="unit">%</span>
+                        </div>
+                    </section>
+                }
+
+                @if (CanShow(PID_FUEL))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Fuel</h3>
+                        <div class="metric @FuelClass(carData?.FuelLevelPercent)">
+                            <span class="value">@FormatInt(carData?.FuelLevelPercent)</span>
+                            <span class="unit">%</span>
+                        </div>
+                    </section>
+                }
+
+                @if (CanShow(PID_COOLANT))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Coolant</h3>
+                        <div class="metric @TempClass(carData?.CoolantTempF)">
+                            <span class="value">@FormatInt(carData?.CoolantTempF)</span>
+                            <span class="unit">°F</span>
+                        </div>
+                    </section>
+                }
+
+                @if (CanShow(PID_OIL))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Oil Temp</h3>
+                        <div class="metric @TempClass(carData?.OilTempF)">
+                            <span class="value">@FormatInt(carData?.OilTempF)</span>
+                            <span class="unit">°F</span>
+                        </div>
+                    </section>
+                }
+
+                @if (CanShow(PID_IAT))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Intake Air</h3>
+                        <div class="metric @IatClass(carData?.IntakeTempF)">
+                            <span class="value">@FormatInt(carData?.IntakeTempF)</span>
+                            <span class="unit">°F</span>
+                        </div>
+                    </section>
+                }
+            </div>
+        }
+        else if (ObdService.IsEcuConnected && !_planKnown)
+        {
+            <div class="cs-card info" style="margin-bottom:12px">
+                Detecting supported sensors for this vehicle…
+            </div>
+        }
+        else
+        {
+            @* Keep your Simulation/Disconnected messaging here if desired *@
+        }
+
+        @* Log card stays visible regardless *@
         <section class="cs-card full">
             <h3>Log</h3>
             <pre style="background:#0c0f14;border-radius:12px;padding:12px;border:1px solid var(--card-border);max-height:220px;overflow:auto;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;color:#7CFF6B">
-                @string.Join("\n", outputLog.TakeLast(120))
+    @string.Join("\n", outputLog.TakeLast(120))
             </pre>
         </section>
-    </div>
-}
+    }
+</div>
 
 @code {
     private CarData? carData;
@@ -111,39 +261,295 @@ else
     private CancellationTokenSource? _simCts;
     private readonly TimeSpan _simTick = TimeSpan.FromSeconds(1);
     private bool _liveLoopRunning;
+    private enum DisplayMode { Gauges, Numbers }
+    private DisplayMode _view = DisplayMode.Gauges;
+    private bool _needsSetup;
+    private bool _attachInProgress;
+    private Action<EcuFingerprint?>? _fpHandler;
 
-    // JS module for the canvas gauge
     private IJSObjectReference? gaugeModule;
     private bool gaugeReady;
-    const int MaxRpm = 8000;
+
+    private void RunSetup() => Nav.NavigateTo("/setup");
+
+    // --- PID-aware UI state ---
+    private HashSet<string> _plan = new(StringComparer.OrdinalIgnoreCase);
+    private bool _planKnown => _plan.Count > 0;
+    private bool CanShow(string pid) => _plan.Contains(pid);
+
+    // convenience PID constants so you don't mistype
+    private const string PID_RPM = "010C";
+    private const string PID_SPEED = "010D";
+    private const string PID_TPS = "0111";
+    private const string PID_FUEL = "012F";
+    private const string PID_COOLANT = "0105";
+    private const string PID_IAT = "010F";
+    private const string PID_OIL = "015C";
+
+    // ---------- profile-aware helpers ----------
+    private string ProfileKey(VehicleProfile? v) => v is null ? "" : $"{v.Year}|{v.Make}|{v.Model}";
+    private string _lastProfileKey = "";
+
+    private int GetTachMax() => Profiles?.Current?.TachMaxRpm ?? 9000;
+    private int GetRedlineStart() => Profiles?.Current?.TachRedlineStart ?? 7000;
+    private int GetSpeedMax() => Profiles?.Current?.SpeedMaxMph ?? 160;
+
+    private string[] BuildTachMajorTicks(int tachMax)
+    {
+        var steps = Math.Max(1, tachMax / 1000);
+        var labels = new List<string>(steps + 1);
+        for (int k = 0; k <= steps; k++) labels.Add(k.ToString());
+        return labels.ToArray();
+    }
+
+    private string[] BuildSpeedMajorTicks(int speedMax)
+    {
+        var labels = new List<string>();
+        for (int s = 0; s <= speedMax; s += 20) labels.Add(s.ToString());
+        return labels.ToArray();
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
-            // Load the module and init the gauge
-            gaugeModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/carspec.gauges.js");
-            await gaugeModule.InvokeVoidAsync(
-                "initRpmGauge", "rpmGauge", carData?.RPM ?? 0, MaxRpm,
-                new { startAngle = 46, ticksAngle = 270, units = "rpm", subUnits = "x1000" }
-            );
-            gaugeReady = true;
+            await EnsureGaugesInitializedAsync();
+            // NEW: if ECU is already connected (e.g., returning from Garage), re-attach
+            if (ObdService.IsEcuConnected && !ObdService.SimulationMode)
+            {
+                await AttachLiveStreamAsync();
+            }
         }
     }
 
-    // Push new RPM to the gauge
-    private async Task SafeSetRpmAsync()
+    private async Task EnsureGaugesInitializedAsync()
     {
-        if (gaugeReady && gaugeModule is not null)
-            await gaugeModule.InvokeVoidAsync("setRpm", carData?.RPM ?? 0);
+        if (gaugeReady) return;
+        if (_view != DisplayMode.Gauges) { gaugeReady = false; return; }
+
+        gaugeModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/carspec.gauges.js");
+
+        // RPM
+        if (CanShow(PID_RPM))
+        {
+            var tachMax  = GetTachMax();
+            var redStart = GetRedlineStart();
+            var ticks    = BuildTachMajorTicks(tachMax);
+
+            await gaugeModule.InvokeVoidAsync("initGauge", "rpmGauge", new {
+                type = "radial", value = carData?.RPM ?? 0, minValue = 0, maxValue = tachMax,
+                startAngle = 46, ticksAngle = 270, units = "rpm",
+                majorTicks = ticks, minorTicks = 5,
+                highlights = new[] { new { from = redStart, to = tachMax, color = "rgba(255,0,0,.28)" } },
+                noResize = true
+            });
+        }
+
+        // Speed
+        if (CanShow(PID_SPEED))
+        {
+            var speedMax  = GetSpeedMax();
+            var speedTicks = BuildSpeedMajorTicks(speedMax);
+            await gaugeModule.InvokeVoidAsync("initGauge", "speedGauge", new {
+                type = "radial", value = carData?.Speed ?? 0, minValue = 0, maxValue = speedMax,
+                units = "mph", majorTicks = speedTicks, minorTicks = 2, highlights = Array.Empty<object>()
+            });
+        }
+
+        if (CanShow(PID_TPS))
+        {
+            await gaugeModule.InvokeVoidAsync("initGauge", "throttleGauge", new {
+                type = "linear", value = carData?.ThrottlePercent ?? 0,
+                minValue = 0, maxValue = 100, valueSuffix = "%", linearOverrides = new { needleSide = "right" }
+            });
+        }
+
+        if (CanShow(PID_FUEL))
+        {
+            await gaugeModule.InvokeVoidAsync("initGauge", "fuelGauge", new {
+                type = "linear", value = carData?.FuelLevelPercent ?? 0,
+                minValue = 0, maxValue = 100, valueSuffix = "%", linearOverrides = new { needleSide = "right" }
+            });
+        }
+
+        if (CanShow(PID_COOLANT))
+        {
+            await gaugeModule.InvokeVoidAsync("initGauge", "coolantGauge", new {
+                type = "radial", value = carData?.CoolantTempF ?? 0,
+                minValue = 120, maxValue = 260, units = "°F",
+                majorTicks = new[] { "120", "160", "180", "200", "220", "240", "260" }
+            });
+        }
+
+        if (CanShow(PID_OIL))
+        {
+            await gaugeModule.InvokeVoidAsync("initGauge", "oilGauge", new {
+                type = "radial", value = carData?.OilTempF ?? 0,
+                minValue = 120, maxValue = 300, units = "°F",
+                majorTicks = new[] { "120", "160", "180", "200", "220", "240", "260", "280", "300" }
+            });
+        }
+
+        if (CanShow(PID_IAT))
+        {
+            await gaugeModule.InvokeVoidAsync("initGauge", "iatGauge", new {
+                type = "radial", value = carData?.IntakeTempF ?? 0,
+                minValue = 0, maxValue = 200, units = "°F",
+                majorTicks = new[] { "0", "50", "100", "150", "200" }
+            });
+        }
+
+        gaugeReady = true;
     }
+
+    private async Task ReinitProfileScaledGaugesAsync()
+    {
+        if (gaugeModule is null) return;
+
+        try { await gaugeModule.InvokeVoidAsync("dispose", "rpmGauge"); } catch { }
+        try { await gaugeModule.InvokeVoidAsync("dispose", "speedGauge"); } catch { }
+
+        var tachMax = GetTachMax();
+        var redStart = GetRedlineStart();
+        var tachTicks = BuildTachMajorTicks(tachMax);
+
+        await gaugeModule.InvokeVoidAsync("initGauge", "rpmGauge", new
+        {
+            type = "radial",
+            value = carData?.RPM ?? 0,
+            minValue = 0,
+            maxValue = tachMax,
+            startAngle = 46,
+            ticksAngle = 270,
+            units = "rpm",
+            majorTicks = tachTicks,
+            minorTicks = 5,
+            highlights = new[] { new { from = redStart, to = tachMax, color = "rgba(255,0,0,.28)" } },
+            noResize = true
+        });
+
+        var speedMax = GetSpeedMax();
+        var speedTicks = BuildSpeedMajorTicks(speedMax);
+
+        await gaugeModule.InvokeVoidAsync("initGauge", "speedGauge", new
+        {
+            type = "radial",
+            value = carData?.Speed ?? 0,
+            minValue = 0,
+            maxValue = speedMax,
+            units = "mph",
+            majorTicks = speedTicks,
+            minorTicks = 2,
+            highlights = Array.Empty<object>()
+        });
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await Profiles.LoadAsync(); // cheap no-op after first load
+        var key = ProfileKey(Profiles?.Current);
+        if (key != _lastProfileKey && gaugeReady)
+        {
+            _lastProfileKey = key;
+            await ReinitProfileScaledGaugesAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task SwitchView(DisplayMode v)
+    {
+        _view = v;
+        StateHasChanged();
+
+        if (v == DisplayMode.Gauges)
+        {
+            if (!gaugeReady)
+                await EnsureGaugesInitializedAsync();
+
+            await Task.Delay(30);
+            if (gaugeModule is not null)
+                await gaugeModule.InvokeVoidAsync("refreshOnShow");
+        }
+    }
+
+    private async Task SafeSetAllGaugesAsync()
+    {
+        if (_view != DisplayMode.Gauges) return;
+        if (!gaugeReady || gaugeModule is null) return;
+
+        // in SafeSetAllGaugesAsync (when you call setSmooth)
+        var fast = new { durSmall = 90, durMed = 160, durBig = 260, durMax = 320 };
+        var med  = new { durSmall = 120, durMed = 220, durBig = 360, durMax = 420 };
+        var slow = new { durSmall = 160, durMed = 260, durBig = 420, durMax = 480 };
+
+        async Task SetIf(string id, double? value, object opts)
+        {
+            try { await gaugeModule.InvokeVoidAsync("setSmooth", id, value ?? 0, opts); } catch { }
+        }
+
+        if (CanShow(PID_RPM))     await SetIf("rpmGauge",      carData?.RPM,            fast);
+        if (CanShow(PID_TPS))     await SetIf("throttleGauge", carData?.ThrottlePercent, fast);
+        if (CanShow(PID_SPEED))   await SetIf("speedGauge",    carData?.Speed,          fast);
+
+        if (CanShow(PID_IAT))     await SetIf("iatGauge",      carData?.IntakeTempF,     med);
+        if (CanShow(PID_COOLANT)) await SetIf("coolantGauge",  carData?.CoolantTempF,    med);
+
+        if (CanShow(PID_FUEL))    await SetIf("fuelGauge",     carData?.FuelLevelPercent, slow);
+        if (CanShow(PID_OIL))     await SetIf("oilGauge",      carData?.OilTempF,         slow);
+    }
+
+    // ---------- numeric formatting ----------
+    private static string FormatInt(int? n) => n is null ? "—" : n.Value.ToString();
+    private static string FormatInt(double? n) => n is null ? "—" : Math.Round(n.Value).ToString("0");
+
+    // ---------- status color helpers (RPM uses profile redline) ----------
+    private string RpmClass(double? r)
+    {
+        if (r is null) return "";
+        var red = GetRedlineStart();
+        var warn = (int)(red * 0.8);
+        return r >= red ? "bad" : r >= warn ? "warn" : "good";
+    }
+
+    private static string SpeedClass(double? s) =>
+        s is null ? "" : (s >= 120 ? "bad" : s >= 90 ? "warn" : "good");
+
+    private static string ThrottleClass(double? t) =>
+        t is null ? "" : (t >= 90 ? "bad" : t >= 70 ? "warn" : "good");
+
+    private static string FuelClass(double? f) =>
+        f is null ? "" : (f <= 10 ? "bad" : f <= 25 ? "warn" : "good");
+
+    private static string TempClass(double? f) =>
+        f is null ? "" : (f >= 230 ? "bad" : f >= 215 ? "warn" : "good");
+
+    private static string IatClass(double? f) =>
+        f is null ? "" : (f >= 150 ? "bad" : f >= 120 ? "warn" : "good");
 
     protected override async Task OnInitializedAsync()
     {
-        // Subscribe to unified service log
+        _needsSetup = !(await Storage.HasAsync(AppKeys.VehicleProfile)) ||
+                      !(await Storage.HasAsync(AppKeys.SetupCompleted));
+
         ObdService.OnLog += HandleLog;
 
+        _fpHandler = fp => InvokeAsync(StateHasChanged);
+        ObdService.OnFingerprint += _fpHandler;
+
         Log("🚀 Starting CarSpec Dashboard...");
+
+        try
+        {
+            await Profiles.LoadAsync();
+            var hasProfile = Profiles.Current != null || await Storage.HasAsync(AppKeys.VehicleProfile);
+            var done = await Storage.HasAsync(AppKeys.SetupCompleted);
+            _needsSetup = !(hasProfile && done);
+            _lastProfileKey = ProfileKey(Profiles?.Current);
+        }
+        catch
+        {
+            _needsSetup = true;
+        }
 
         try
         {
@@ -154,8 +560,15 @@ else
             Log($"[Error] Failed to get initial data: {ex.Message}");
         }
 
-        // Start simulation producer; it only updates while SimulationMode == true
-        StartSimulationLoop();
+        // If already connected, attach live stream; else start simulation loop
+        if (ObdService.IsEcuConnected && !ObdService.SimulationMode)
+        {
+            await AttachLiveStreamAsync();
+        }
+        else
+        {
+            StartSimulationLoop();
+        }
     }
 
     private void StartSimulationLoop()
@@ -175,7 +588,7 @@ else
                         carData = CarData.Simulated();
                         await InvokeAsync(async () =>
                         {
-                            await SafeSetRpmAsync();
+                            await SafeSetAllGaugesAsync();
                             StateHasChanged();
                         });
                     }
@@ -189,7 +602,19 @@ else
 
     private async Task SwitchToLive()
     {
-        if (_liveLoopRunning) return; // Gaurd against multi clicking
+        if (_needsSetup)
+        {
+            Nav.NavigateTo("/setup");
+            return;
+        }
+
+        if (ObdService.IsEcuConnected && !_liveLoopRunning)
+        {
+            await AttachLiveStreamAsync();
+            return;
+        }
+
+        if (_liveLoopRunning) return;
         Log("🔌 Attempting to connect to Live OBD-II...");
 
         bool connected = await ObdService.AutoConnectAsync();
@@ -198,21 +623,52 @@ else
             Log("✅ Connected to OBD-II adapter successfully!");
             await ZeroOutDataAsync();
 
-            // Start live data loop after ECU confirmation
             if (!ObdService.SimulationMode && ObdService.IsEcuConnected)
             {
                 Log("📡 Starting live ECU data stream...");
+                // inside SwitchToLive(), where you start the live loop:
                 _liveLoopRunning = true;
 
-                _ = ObdService.StartLiveDataLoopAsync(cd =>
+                _ = ObdService.StartLiveDataLoopAsync(async cd =>
                 {
-                    carData = cd;
+                    // incoming snapshot
+                    var plan = ObdService.CurrentPollPlan ?? Array.Empty<string>();
+                    var newPlan = plan.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-                    InvokeAsync(async () =>
+                    // plan change?
+                    bool planChanged = !_planKnown || !_plan.SetEquals(newPlan);
+
+                    if (planChanged)
                     {
-                        await SafeSetRpmAsync(); // This keeps the RPM gauge in sync
-                        StateHasChanged();
-                    });
+                        await InvokeAsync(async () =>
+                        {
+                            // 1) remember plan, mark gauges dirty
+                            _plan = newPlan;
+                            carData = cd;
+                            gaugeReady = false;
+
+                            // 2) render DOM so the canvases exist
+                            StateHasChanged();
+
+                            // 3) wait a tick so render completes
+                            await Task.Yield();
+
+                            // 4) now build only the gauges we actually show
+                            await EnsureGaugesInitializedAsync();
+
+                            // 5) push first values
+                            await SafeSetAllGaugesAsync();
+                        });
+                    }
+                    else
+                    {
+                        await InvokeAsync(async () =>
+                        {
+                            carData = cd;
+                            await SafeSetAllGaugesAsync();
+                            StateHasChanged();
+                        });
+                    }
                 });
             }
             else
@@ -242,7 +698,7 @@ else
 
                     InvokeAsync(async () =>
                     {
-                        await SafeSetRpmAsync();
+                        await SafeSetAllGaugesAsync();
                         StateHasChanged();
                     });
                 });
@@ -251,6 +707,63 @@ else
         else
         {
             Log("❌ ECU still offline.");
+        }
+    }
+
+    private async Task AttachLiveStreamAsync()
+    {
+        if (_attachInProgress) return;
+        _attachInProgress = true;
+
+        try
+        {
+            // If the ECU is already connected, (re)start the service loop with *this* page's callback.
+            if (ObdService.IsEcuConnected && !ObdService.SimulationMode)
+            {
+                // Seed plan if the service already has one
+                var plan = ObdService.CurrentPollPlan ?? Array.Empty<string>();
+                _plan = plan.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                // (Re)build gauges for the known plan
+                if (_view == DisplayMode.Gauges)
+                {
+                    gaugeReady = false;
+                    await EnsureGaugesInitializedAsync();
+                }
+
+                _liveLoopRunning = true;
+                _ = ObdService.StartLiveDataLoopAsync(async cd =>
+                {
+                    var newPlan = (ObdService.CurrentPollPlan ?? Array.Empty<string>())
+                                  .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    bool planChanged = !_planKnown || !_plan.SetEquals(newPlan);
+
+                    await InvokeAsync(async () =>
+                    {
+                        carData = cd;
+
+                        if (planChanged)
+                        {
+                            _plan = newPlan;
+                            gaugeReady = false;
+                            StateHasChanged();
+                            await Task.Yield();
+                            await EnsureGaugesInitializedAsync();
+                        }
+
+                        await SafeSetAllGaugesAsync();
+                        StateHasChanged();
+                    });
+                });
+            }
+            else if (ObdService.SimulationMode)
+            {
+                // keep the simulation loop as you had it
+            }
+        }
+        finally
+        {
+            _attachInProgress = false;
         }
     }
 
@@ -285,22 +798,21 @@ else
         (ObdService.IsAdapterConnected ? "is-adapter" :
         ObdService.SimulationMode ? "is-sim" : "is-disc");
 
-     private async Task ZeroOutDataAsync()
-     {
-         carData ??= new CarData();
-         carData.RPM = 0;
-         carData.Speed = 0;
-         carData.ThrottlePercent = 0;
-         carData.FuelLevelPercent = 0;
-         carData.CoolantTempF = 0;
-         carData.OilTempF = 0;
-         carData.IntakeTempF = 0;
-         carData.LastUpdated = DateTime.Now;
+    private async Task ZeroOutDataAsync()
+    {
+        carData ??= new CarData();
+        carData.RPM = 0;
+        carData.Speed = 0;
+        carData.ThrottlePercent = 0;
+        carData.FuelLevelPercent = 0;
+        carData.CoolantTempF = 0;
+        carData.OilTempF = 0;
+        carData.IntakeTempF = 0;
+        carData.LastUpdated = DateTime.Now;
 
-         await SafeSetRpmAsync();
-         await InvokeAsync(StateHasChanged);
-     }
-
+        await SafeSetAllGaugesAsync();
+        await InvokeAsync(StateHasChanged);
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -309,9 +821,12 @@ else
 
         if (gaugeModule is not null)
         {
-            try { await gaugeModule.InvokeVoidAsync("disposeRpmGauge"); } catch { }
+            try { await gaugeModule.InvokeVoidAsync("disposeAll"); } catch { }
             await gaugeModule.DisposeAsync();
         }
+
         ObdService.OnLog -= HandleLog;
+        if (_fpHandler is not null)
+            ObdService.OnFingerprint -= _fpHandler;
     }
 }

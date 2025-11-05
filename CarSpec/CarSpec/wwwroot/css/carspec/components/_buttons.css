@@ -1,0 +1,45 @@
+﻿.cs-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-radius: 14px;
+    border: 1px solid var(--btn-border);
+    background: var(--btn-bg);
+    color: var(--btn-text);
+    cursor: pointer;
+    transition: transform .15s, box-shadow .2s, border-color .2s;
+}
+
+    .cs-btn:hover {
+        transform: translateY(-1px);
+        border-color: var(--btn-hover-border);
+    }
+
+    .cs-btn.primary {
+        background: linear-gradient(180deg,var(--btn-primary-start),var(--btn-primary-end));
+        color: var(--btn-primary-text);
+        border-color: var(--btn-primary-border);
+        box-shadow: 0 10px 25px -10px var(--cs-glow);
+    }
+
+        .cs-btn.primary:hover {
+            filter: brightness(1.05);
+        }
+
+button.cs-btn {
+    box-shadow: 0 6px 22px -12px var(--cs-shadow);
+}
+
+.cs-btn--link {
+    font: inherit;
+    color: var(--nav-link);
+    background: none;
+    border: 0;
+    padding: 0;
+}
+
+:where(.cs-btn,.cs-badge,.cs-pill):focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--ring);
+}

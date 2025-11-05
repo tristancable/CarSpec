@@ -1,0 +1,32 @@
+﻿.cs-grid {
+    display: grid;
+    grid-template-columns: repeat(12,1fr);
+    gap: var(--gauge-gap);
+}
+
+.cs-card {
+    grid-column: span 4;
+    border-radius: var(--cs-radius-lg);
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    box-shadow: var(--card-elev-shadow);
+    padding: var(--card-pad);
+}
+
+    .cs-card.wide {
+        grid-column: span 8;
+    }
+
+    .cs-card.full {
+        grid-column: 1 / -1;
+    }
+
+    .cs-card h3 {
+        font-family: var(--cs-font);
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        font-weight: 700;
+        font-size: var(--title-size);
+        margin-bottom: 12px;
+        color: var(--muted);
+    }

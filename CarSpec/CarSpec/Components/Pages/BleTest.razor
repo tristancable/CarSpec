@@ -1,56 +1,131 @@
 ﻿@page "/bletest"
 @using Plugin.BLE
 @using Plugin.BLE.Abstractions.Contracts
+@using Plugin.BLE.Abstractions.EventArgs
+@using Plugin.BLE.Abstractions
+@using System.Text.RegularExpressions
+@using System.Linq
 
 <h2>BLE Device Scanner</h2>
+<p>Detect your OBDs device name</p>
 
-<button class="btn btn-primary mb-3" @onclick="StartScan">Start Scan</button>
+@if (!isScanning)
+{
+    <button class="btn btn-primary mb-3" @onclick="StartScan">Start Scan</button>
+}
+else
+{
+    <button class="btn btn-primary mb-3" @onclick="StopScan">Stop Scan</button>
+}
 
 @if (isScanning)
 {
     <p>Scanning... Please wait ~10 seconds</p>
 }
 
+<h4>Discovered devices</h4>
 <ul>
     @foreach (var d in devices)
     {
-        <li>@d.Name (@d.Id)</li>
+        <li>@(string.IsNullOrWhiteSpace(d.Name) ? "—" : d.Name) (@d.Id)</li>
     }
 </ul>
 
+@if (obdCandidates.Any())
+{
+    <div class="cs-badge warn" style="margin-top:8px">
+        Possible OBD device detected:
+        <strong>@string.Join(", ", obdCandidates)</strong>
+    </div>
+}
+else if (!isScanning && devices.Count > 0)
+{
+    <div class="cs-badge" style="margin-top:8px">No likely OBD devices found.</div>
+}
+
 @if (errorMessage is not null)
 {
-    <p class="text-red-500">@errorMessage</p>
+    <p class="text-danger">@errorMessage</p>
 }
 
 @code {
     private bool isScanning = false;
     private List<IDevice> devices = new();
+    private List<string> obdCandidates = new(); // <- changed: track matching device names
     private string? errorMessage;
+    private EventHandler<DeviceEventArgs>? deviceDiscoveredHandler;
+
+    // Simple name heuristics — passive, no connect
+    private static readonly Regex ObdNameRegex = new(@"(\b(OBD|ELM327|VEEPEAK|OBDII|OBD2|OBD-2|OBD-LINK|OBDLINK|BLUEDRIVER|HM-10|UART|NORDIC)\b)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private async Task StartScan()
     {
         try
         {
             devices.Clear();
+            obdCandidates.Clear();
+            foundObdCandidate = false; // keep for backward-compat if you used it elsewhere
             errorMessage = null;
             isScanning = true;
 
             var adapter = CrossBluetoothLE.Current.Adapter;
-            adapter.DeviceDiscovered += (s, a) =>
-            {
-                if (!devices.Contains(a.Device))
-                    devices.Add(a.Device);
-                InvokeAsync(StateHasChanged);
-            };
 
+            // dedupe by Id
+            deviceDiscoveredHandler = (s, a) =>
+            {
+                var d = a.Device;
+                if (!devices.Any(x => x.Id == d.Id))
+                {
+                    devices.Add(d);
+                    InvokeAsync(StateHasChanged);
+                }
+            };
+            adapter.DeviceDiscovered += deviceDiscoveredHandler;
+
+            // passive scan only; plugin's default scan duration applies
             await adapter.StartScanningForDevicesAsync();
 
             isScanning = false;
+
+            // passive identification by name (no connect/probe)
+            IdentifyObdCandidatesPassive();
         }
         catch (Exception ex)
         {
             errorMessage = ex.Message;
+            isScanning = false;
         }
+    }
+
+    // NOTE: keep a fallback bool if other code expects it
+    private bool foundObdCandidate = false;
+
+    private void IdentifyObdCandidatesPassive()
+    {
+        // Populate list of matching device names (or Id if name null)
+        obdCandidates = devices
+            .Where(d => !string.IsNullOrWhiteSpace(d.Name) && ObdNameRegex.IsMatch(d.Name!))
+            .Select(d => d.Name ?? d.Id.ToString())
+            .Distinct()
+            .ToList();
+
+        foundObdCandidate = obdCandidates.Any();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task StopScan()
+    {
+        try
+        {
+            await CrossBluetoothLE.Current.Adapter.StopScanningForDevicesAsync();
+        }
+        catch { }
+
+        if (deviceDiscoveredHandler != null)
+            CrossBluetoothLE.Current.Adapter.DeviceDiscovered -= deviceDiscoveredHandler;
+
+        isScanning = false;
+        await InvokeAsync(StateHasChanged);
     }
 }

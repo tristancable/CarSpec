@@ -1,0 +1,36 @@
+﻿:root {
+    /* Brand */
+    --cs-ember: #ff3b0a;
+    --cs-sunrise: #ff7a1a;
+    --cs-amber: #ffa241;
+    /* Neutrals */
+    --cs-gunmetal: #14171c;
+    --cs-iron: #1f232a;
+    --cs-slate: #2a2f37;
+    --cs-graphite: #3a414d;
+    /* Text */
+    --cs-mist: #cfd6e6;
+    --cs-white: #f5f7fb;
+    /* States */
+    --cs-green: #25d366;
+    --cs-yellow: #f2c94c;
+    --cs-red: #ff4d4f;
+    /* FX */
+    --cs-shadow: rgba(0,0,0,.45);
+    --cs-glow: rgba(255,122,26,.35);
+    /* Radius */
+    --cs-radius: 16px;
+    --cs-radius-lg: 22px;
+    --cs-radius-xl: 28px;
+    /* Misc */
+    --cs-blur: 14px;
+    /* Type */
+    --cs-font: "Audiowide","Oxanium",system-ui,sans-serif;
+    --cs-body: "Barlow","Inter",system-ui,sans-serif;
+    /* Gauges + layout knobs */
+    --gauge-font-scale: .25;
+    --gauge-size: 280px;
+    --gauge-gap: 18px;
+    --card-pad: 18px;
+    --title-size: 14px;
+}

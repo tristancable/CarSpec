@@ -1,0 +1,36 @@
+﻿/* Inline stat rows (label + value with state colors) */
+.cs-stat {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,0));
+    border: 1px solid var(--card-border);
+    margin-top: 8px;
+}
+
+    .cs-stat .label {
+        color: var(--muted);
+        font-size: 12px;
+    }
+
+    .cs-stat .value {
+        font-family: var(--cs-font);
+        font-size: 18px;
+        letter-spacing: 1px;
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: "tnum" 1;
+    }
+
+    .cs-stat.good .value {
+        color: var(--cs-green);
+    }
+
+    .cs-stat.warn .value {
+        color: var(--cs-yellow);
+    }
+
+    .cs-stat.bad .value {
+        color: var(--cs-red);
+    }

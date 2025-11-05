@@ -1,0 +1,227 @@
+﻿@page "/setup"
+@using Microsoft.AspNetCore.Components.Forms
+@using CarSpec.Models
+@using CarSpec.Constants
+@inject CarSpec.Interfaces.IVehicleProfileService Profiles
+@inject CarSpec.Interfaces.IAppStorage Storage
+@inject NavigationManager Nav
+
+<h2 class="cs-title" style="margin:6px 0 12px">Vehicle Setup</h2>
+
+@if (catalog is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    <EditForm Model="form" OnValidSubmit="Save">
+        <div class="grid" style="display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
+
+            <div>
+                <label>Year</label>
+                <InputSelect @bind-Value="Year" TValue="string">
+                    <option value="">Select</option>
+                    @foreach (var y in years)
+                    {
+                        <option value="@y">@y</option>
+                    }
+                </InputSelect>
+            </div>
+
+            <div>
+                <label>Make</label>
+                <InputSelect @bind-Value="Make" TValue="string" disabled="@string.IsNullOrWhiteSpace(form.Year)">
+                    <option value="">Select</option>
+                    @foreach (var m in makes)
+                    {
+                        <option value="@m">@m</option>
+                    }
+                </InputSelect>
+            </div>
+
+            <div>
+                <label>Model</label>
+                <InputSelect @bind-Value="Model" TValue="string" disabled="@string.IsNullOrWhiteSpace(form.Make)">
+                    <option value="">Select</option>
+                    @foreach (var m in filteredModels)
+                    {
+                        <option value="@m">@m</option>
+                    }
+                </InputSelect>
+            </div>
+
+            <div>
+                <label>Adapter Type</label>
+                <InputSelect @bind-Value="form.AdapterType">
+                    <option value="BLE">BLE</option>
+                    <option value="WiFi">WiFi</option>
+                    <option value="USB">USB</option>
+                </InputSelect>
+            </div>
+
+            <div>
+                <label>Adapter Name (optional)</label>
+                <InputText @bind-Value="form.AdapterNamePrimary" placeholder="e.g., VEEPEAK" />
+            </div>
+        </div>
+
+        <div style="margin-top:12px;display:flex;gap:8px;">
+            <button class="cs-btn primary" type="submit" disabled="@(!CanSave())">Save</button>
+            <button class="cs-btn btn-secondary" type="button" @onclick="Cancel">Cancel</button>
+        </div>
+    </EditForm>
+}
+
+@code {
+    // --- Plain DTO (no logic here) ---
+    private sealed class VehicleForm
+    {
+        public string? Year { get; set; }
+        public string? Make { get; set; }
+        public string? Model { get; set; }
+        public string AdapterType { get; set; } = "BLE";
+        public string? AdapterNamePrimary { get; set; }
+    }
+
+    private VehicleForm form = new();
+    private IReadOnlyList<VehicleProfile>? catalog;
+    private List<string> years = new();
+    private List<string> makes = new();
+    private List<string> filteredModels = new();
+
+    // --- Wrapper properties bound by the selects ---
+    private string? Year
+    {
+        get => form.Year;
+        set
+        {
+            if (form.Year == value) return;
+            form.Year = value;
+            RebuildMakesForYear();
+            // reset downstream
+            form.Make = string.Empty;
+            form.Model = string.Empty;
+            filteredModels.Clear();
+            StateHasChanged();
+        }
+    }
+
+    private string? Make
+    {
+        get => form.Make;
+        set
+        {
+            if (form.Make == value) return;
+            form.Make = value;
+            RebuildModelsForYearMake();
+            // reset model
+            form.Model = string.Empty;
+            StateHasChanged();
+        }
+    }
+
+    private string? Model
+    {
+        get => form.Model;
+        set
+        {
+            if (form.Model == value) return;
+            form.Model = value;
+            StateHasChanged();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Profiles.LoadAsync();
+        catalog = Profiles.All ?? Array.Empty<VehicleProfile>();
+
+        // Build year list (unique, trimmed, numeric-desc sort)
+        years = catalog
+            .Select(v => (v.Year ?? "").Trim())
+            .Where(y => !string.IsNullOrWhiteSpace(y))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(y => int.TryParse(y, out var n) ? n : int.MinValue)
+            .ToList();
+
+        // Start empty until a year is chosen
+        makes.Clear();
+        filteredModels.Clear();
+    }
+
+    private void RebuildMakesForYear()
+    {
+        var year = (form.Year ?? "").Trim();
+
+        makes = (catalog ?? Array.Empty<VehicleProfile>())
+            .Where(v => string.Equals(v.Year?.Trim(), year, StringComparison.OrdinalIgnoreCase))
+            .Select(v => (v.Make ?? "").Trim())
+            .Where(m => !string.IsNullOrWhiteSpace(m))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(m => m)
+            .ToList();
+    }
+
+    private void RebuildModelsForYearMake()
+    {
+        var year = (form.Year ?? "").Trim();
+        var make = (form.Make ?? "").Trim();
+
+        filteredModels = (catalog ?? Array.Empty<VehicleProfile>())
+            .Where(v =>
+                string.Equals(v.Year?.Trim(), year, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(v.Make?.Trim(), make, StringComparison.OrdinalIgnoreCase))
+            .Select(v => (v.Model ?? "").Trim())
+            .Where(m => !string.IsNullOrWhiteSpace(m))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(m => m)
+            .ToList();
+    }
+
+    private bool CanSave() =>
+        !string.IsNullOrWhiteSpace(form.Year) &&
+        !string.IsNullOrWhiteSpace(form.Make) &&
+        !string.IsNullOrWhiteSpace(form.Model);
+
+    private async Task Save()
+    {
+        if (!CanSave()) return;
+
+        var y = form.Year!.Trim();
+        var mk = form.Make!.Trim();
+        var md = form.Model!.Trim();
+
+        var all = Profiles.All ?? Array.Empty<VehicleProfile>();
+        var chosen = all.FirstOrDefault(v =>
+                            string.Equals(v.Year?.Trim(),  y,  StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(v.Make?.Trim(),  mk, StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(v.Model?.Trim(), md, StringComparison.OrdinalIgnoreCase))
+                     ?? new VehicleProfile
+                     {
+                         Year = y,
+                         Make = mk,
+                         Model = md,
+                         PreferredTransport   = form.AdapterType,
+                         PreferredAdapterName = form.AdapterNamePrimary ?? ""
+                     };
+
+        await Storage.SetAsync(AppKeys.VehicleProfile, chosen);
+        await Storage.SetAsync(AppKeys.SetupCompleted, true);
+
+        var garage = await Storage.GetAsync<List<VehicleProfile>>(AppKeys.VehicleProfiles)
+                    ?? new List<VehicleProfile>();
+
+        bool exists = garage.Any(v =>
+            string.Equals(v.Year?.Trim(),  chosen.Year?.Trim(),  StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(v.Make?.Trim(),  chosen.Make?.Trim(),  StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(v.Model?.Trim(), chosen.Model?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+        if (!exists) garage.Add(chosen);
+        await Storage.SetAsync(AppKeys.VehicleProfiles, garage);
+
+        Profiles.Set(chosen);
+        Nav.NavigateTo("/garage");
+    }
+
+    private void Cancel() => Nav.NavigateTo("/garage");
+}

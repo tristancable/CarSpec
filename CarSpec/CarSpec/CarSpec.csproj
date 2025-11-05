@@ -35,6 +35,7 @@
 		<MauiImage Include="Resources\Images\*" />
 		<MauiFont Include="Resources\Fonts\*" />
 		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+		<MauiAsset Include="Resources\Raw\vehicles.json" LogicalName="vehicles.json" />
 	</ItemGroup>
 
 	<ItemGroup>

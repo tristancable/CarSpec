@@ -1,0 +1,23 @@
+﻿html[data-theme="light"] {
+    --bg: linear-gradient(180deg,#f3f5fb,#e9eef7);
+    --text: #1b1f27;
+    --muted: #495160;
+    --card: linear-gradient(180deg,#fff,#f3f6fb);
+    --card-border: rgba(20,23,28,.10);
+    --ring: #ef6c00;
+    --nav-bg: linear-gradient(180deg, rgba(255,255,255,.85), rgba(255,255,255,.65));
+    --badge-bg: linear-gradient(180deg,#fff,#f3f6fb);
+    --pill-bg: linear-gradient(180deg,#fff,#f3f6fb);
+    --nav-link: var(--cs-sunrise);
+    --nav-link-hover: var(--cs-amber);
+    --nav-link-glow: rgba(255,140,0,.35);
+    --btn-text: #1b1f27;
+    --btn-bg: linear-gradient(180deg,#fff,#edf2f9);
+    --btn-border: rgba(20,23,28,.12);
+    --btn-hover-border: rgba(20,23,28,.24);
+    --btn-primary-text: #111;
+    --btn-primary-start: #ffb46e;
+    --btn-primary-end: #ff7a1a;
+    --btn-primary-border: rgba(239,108,0,.45);
+    --card-elev-shadow: 0 10px 28px -20px rgba(0,0,0,.15), inset 0 1px 0 rgba(0,0,0,.03);
+}

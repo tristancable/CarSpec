@@ -1,6 +1,7 @@
 ﻿using Plugin.BLE;
 using Plugin.BLE.Abstractions.Contracts;
 using Plugin.BLE.Abstractions.EventArgs;
+using Plugin.BLE.Abstractions.Extensions;
 
 namespace CarSpec.Services.Bluetooth
 {
@@ -30,23 +31,23 @@ namespace CarSpec.Services.Bluetooth
                 return null;
             }
 
-            OnLog?.Invoke($"🔍 Scanning for {name1}/{name2} devices...");
+            var label = string.IsNullOrWhiteSpace(name2) ? name1 : $"{name1}/{name2}";
+            OnLog?.Invoke($"🔍 Scanning for {label} devices...");
 
             IDevice? foundDevice = null;
 
-            // Capture handler so we can unsubscribe
             void Handler(object? s, DeviceEventArgs a)
             {
-                var d = a.Device;
-                if (d != null && !string.IsNullOrEmpty(d.Name))
+                var n = a.Device?.Name;
+                if (string.IsNullOrWhiteSpace(n)) return;
+
+                if (n.Contains(name1, StringComparison.OrdinalIgnoreCase) ||
+                    (!string.IsNullOrWhiteSpace(name2) &&
+                     n.Contains(name2, StringComparison.OrdinalIgnoreCase)))
                 {
-                    if (d.Name.Contains(name1, StringComparison.OrdinalIgnoreCase) ||
-                        d.Name.Contains(name2, StringComparison.OrdinalIgnoreCase))
-                    {
-                        foundDevice = d;
-                        // Try to stop early if supported
-                        try { _adapter.StopScanningForDevicesAsync(); } catch { /* ignore */ }
-                    }
+                    foundDevice = a.Device;
+                    // stop scan ASAP once we’ve found a match
+                    try { _adapter.StopScanningForDevicesAsync(); } catch { }
                 }
             }
 
@@ -54,7 +55,9 @@ namespace CarSpec.Services.Bluetooth
 
             try
             {
-                await _adapter.StartScanningForDevicesAsync(); // returns when scan stops
+                // give the scan a bounded time window
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await _adapter.StartScanningForDevicesAsync(cts.Token);
             }
             catch (Exception ex)
             {

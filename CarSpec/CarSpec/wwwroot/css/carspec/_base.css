@@ -1,0 +1,41 @@
+﻿html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--cs-body);
+    letter-spacing: .2px;
+}
+
+#app {
+    min-height: 100vh;
+}
+
+a {
+    color: var(--cs-amber);
+    text-decoration: none;
+}
+
+    a:hover {
+        text-decoration: underline;
+    }
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px;
+}
+/* numeric font vibe */
+.cs-title, .gauge-subunits, .gauge-readout, .cs-stat .value {
+    font-family: var(--cs-font);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+}
+
+.cs-title {
+    letter-spacing: 1.2px;
+}
+
+.cs-nav a, .cs-btn, .cs-stat .value {
+    letter-spacing: .5px;
+}

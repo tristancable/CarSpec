@@ -1,0 +1,95 @@
+﻿@media (min-width:1200px) {
+    .cs-grid {
+        grid-template-columns: repeat(3,1fr);
+    }
+}
+/* Force 3 columns on desktop; drop to 1 on mobile */
+@media (min-width:900px) {
+    .cs-grid {
+        grid-template-columns: repeat(3, minmax(300px,1fr));
+        gap: var(--gauge-gap);
+    }
+
+    .cs-card {
+        grid-column: auto;
+    }
+}
+
+@media (max-width:899.98px) {
+    .cs-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width:720px) {
+    .container {
+        padding: 16px;
+    }
+
+    .cs-controls {
+        gap: 12px;
+        margin-bottom: 14px;
+    }
+
+        .cs-controls .cs-badge, .cs-controls .cs-btn {
+            height: 38px;
+        }
+
+    .cs-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .cs-card, .cs-card.wide, .cs-card.full {
+        grid-column: 1 / -1;
+    }
+
+    :root {
+        --gauge-size: 240px;
+    }
+}
+/* tighten for short screens */
+@media (max-height:980px) {
+    :root {
+        --gauge-size: 240px;
+        --gauge-gap: 14px;
+        --card-pad: 14px;
+        --title-size: 13px;
+    }
+}
+
+@media (max-height:860px) {
+    :root {
+        --gauge-size: 220px;
+        --gauge-gap: 12px;
+        --card-pad: 12px;
+        --title-size: 12px;
+    }
+}
+/* optional density knobs */
+html[data-density="compact"] {
+    --gauge-size: 240px;
+    --gauge-gap: 14px;
+    --card-pad: 14px;
+    --title-size: 13px;
+}
+
+html[data-density="ultra"] {
+    --gauge-size: 220px;
+    --gauge-gap: 12px;
+    --card-pad: 12px;
+    --title-size: 12px;
+}
+
+/* two mini bars in one card (keep if you ever use it) */
+.gauge-row {
+    display: grid;
+    grid-template-columns: repeat(2,minmax(0,1fr));
+    gap: 12px;
+    align-items: center;
+}
+
+.gauge-host.gauge--mini {
+    --gsize: calc(var(--gauge-size)*0.78);
+    width: var(--gsize);
+    height: var(--gsize);
+}

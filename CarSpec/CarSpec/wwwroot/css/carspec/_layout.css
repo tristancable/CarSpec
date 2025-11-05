@@ -1,0 +1,19 @@
+﻿.cs-shell {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+}
+
+.cs-main {
+    flex: 1 0 auto;
+}
+
+.cs-footer {
+    margin-top: auto;
+    padding: 12px 18px;
+    color: var(--muted);
+    text-align: center;
+    border-top: 1px solid var(--card-border);
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}

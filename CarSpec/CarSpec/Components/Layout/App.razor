@@ -1,0 +1,30 @@
+﻿@inject CarSpec.Interfaces.IAppStorage Storage
+@inject NavigationManager Nav
+
+<CascadingValue Value="this">
+    <Router AppAssembly="@typeof(App).Assembly" OnNavigateAsync="HandleNav">
+        <Found Context="routeData">
+            <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
+        </Found>
+        <NotFound>
+            <LayoutView Layout="@typeof(MainLayout)">
+                <p>Page not found.</p>
+            </LayoutView>
+        </NotFound>
+    </Router>
+</CascadingValue>
+
+@code {
+    private async Task HandleNav(NavigationContext ctx)
+    {
+        if (ctx.Path.StartsWith("setup", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var hasProfile = await Storage.HasAsync(AppKeys.VehicleProfile);
+        var done = await Storage.HasAsync(AppKeys.SetupCompleted);
+        if (!hasProfile || !done)
+        {
+            Nav.NavigateTo("/setup");
+        }
+    }
+}

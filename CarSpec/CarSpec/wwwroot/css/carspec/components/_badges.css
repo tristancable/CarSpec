@@ -1,0 +1,51 @@
+﻿/* Badges (generic + panel linkable badge) */
+.cs-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: var(--badge-bg);
+    border: 1px solid var(--card-border);
+    color: inherit;
+}
+
+    .cs-badge img {
+        width: 26px;
+        height: 26px;
+    }
+
+.cs-badge--panel {
+    padding: 10px 16px;
+    gap: 12px;
+    border-radius: 16px;
+}
+
+    .cs-badge--panel .label {
+        opacity: .85;
+        font-weight: 600;
+    }
+
+/* Make anchor badges behave like badges without underline */
+a.cs-badge, a.cs-badge:hover, a.cs-badge:focus {
+    text-decoration: none !important;
+    color: inherit;
+}
+
+    a.cs-badge .cs-title {
+        color: var(--cs-sunrise);
+        transition: color .15s ease, text-shadow .15s ease;
+    }
+
+    a.cs-badge:hover .cs-title, a.cs-badge:focus-visible .cs-title {
+        color: var(--cs-amber);
+        text-shadow: 0 0 8px rgba(255,90,20,.35);
+    }
+
+.cs-controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin: 6px 0 16px
+}

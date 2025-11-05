@@ -1,0 +1,28 @@
+﻿[
+  {
+    "Year": "2002",
+    "Make": "Subaru",
+    "Model": "WRX",
+    "Engine": "EJ205",
+    "PreferredTransport": "BLE",
+    "ProtocolHint": "ISO9141",
+    "InitScript": [ "ATE0", "ATL0", "ATS0", "ATAL", "ATAT1", "ATH1" ],
+    "DesiredMode01Pids": [ "010C", "010D", "0111", "012F", "0105", "010F", "015C" ],
+    "TachMaxRpm": 9000,
+    "TachRedlineStart": 7000,
+    "SpeedMaxMph": 140
+  },
+  {
+    "Year": "2015",
+    "Make": "Toyota",
+    "Model": "86",
+    "Engine": "FA20",
+    "PreferredTransport": "BLE",
+    "ProtocolHint": "CAN11_500",
+    "InitScript": [ "ATE0", "ATL0", "ATS0", "ATAL", "ATAT1", "ATH1", "ATSH 7E0", "ATCRA 7E8", "ATCAF1" ],
+    "DesiredMode01Pids": [ "010C", "010D", "0111", "012F", "0105", "010F" ],
+    "TachMaxRpm": 9000,
+    "TachRedlineStart": 7000,
+    "SpeedMaxMph": 140
+  }
+]

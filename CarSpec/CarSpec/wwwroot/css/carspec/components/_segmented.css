@@ -1,0 +1,40 @@
+﻿.cs-seg-icons {
+    display: inline-flex;
+    gap: 6px;
+    padding: 4px;
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    background: var(--badge-bg);
+    box-shadow: 0 6px 18px -14px var(--cs-shadow) inset;
+}
+
+    .cs-seg-icons .seg {
+        width: 42px;
+        height: 36px;
+        display: grid;
+        place-items: center;
+        border-radius: 10px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        transition: color .15s ease, box-shadow .15s ease, background .15s ease;
+    }
+
+        .cs-seg-icons .seg svg {
+            width: 20px;
+            height: 20px;
+            display: block; /* avoid inline whitespace */
+        }
+
+        .cs-seg-icons .seg:hover {
+            color: var(--nav-link-hover);
+            box-shadow: 0 0 0 1px var(--btn-hover-border) inset;
+        }
+
+        .cs-seg-icons .seg.active {
+            background: var(--btn-bg);
+            color: var(--cs-amber);
+            border-color: var(--btn-hover-border);
+            box-shadow: 0 8px 22px -14px var(--cs-shadow), 0 0 0 1px var(--btn-hover-border) inset;
+        }

@@ -1,4 +1,7 @@
-﻿using CarSpec.Services.Obd;
+﻿using CarSpec.Interfaces;
+using CarSpec.Services.Obd;
+using CarSpec.Services.Profiles;
+using CarSpec.Services.Storage;
 using Microsoft.Extensions.Logging;
 using Syncfusion.Blazor;
 
@@ -19,7 +22,10 @@ namespace CarSpec
             builder.Services.AddMauiBlazorWebView();
             //builder.Services.AddSingleton<ObdService>();
             builder.Services.AddSingleton<ObdConnectionService>();
+            builder.Services.AddScoped<IVehicleProfileService, VehicleProfileService>();
+            builder.Services.AddScoped<IAppStorage, PreferencesStorage>();
             builder.Services.AddSyncfusionBlazor();
+
 
 #if DEBUG
             builder.Services.AddBlazorWebViewDeveloperTools();
