@@ -43,15 +43,6 @@ else
                 {
                     <!-- Edit form -->
                     <div class="cs-stat">
-                        <span class="label">Adapter Type</span>
-                        <InputSelect @bind-Value="_edit.PreferredTransport">
-                            <option value="BLE">BLE</option>
-                            <option value="WiFi">WiFi</option>
-                            <option value="USB">USB</option>
-                        </InputSelect>
-                    </div>
-
-                    <div class="cs-stat">
                         <span class="label">Adapter Name</span>
                         <InputText @bind-Value="_edit.PreferredAdapterName" placeholder="e.g., VEEPEAK" />
                     </div>
@@ -116,6 +107,85 @@ else
                         </div>
                     }
 
+                    <hr style="opacity:.25" />
+
+                    <!-- Learned on first successful connection -->
+                    <details style="margin-top:8px">
+                        <summary class="cs-link">Show learned ECU details</summary>
+                        @if (!string.IsNullOrWhiteSpace(c.PreferredTransport))
+                        {
+                            <div class="cs-stat">
+                                <span class="label">Adapter Type (preferred)</span>
+                                <span class="value">@c.PreferredTransport</span>
+                            </div>
+                        }
+                        ))
+
+                        @if (!string.IsNullOrWhiteSpace(c.ProtocolDetected))
+                        {
+                            <div class="cs-stat">
+                                <span class="label">Protocol (detected)</span>
+                                <span class="value">@c.ProtocolDetected</span>
+                            </div>
+                        }
+
+                        @if (!string.IsNullOrWhiteSpace(c.VinLast))
+                        {
+                            <div class="cs-stat">
+                                <span class="label">VIN</span>
+                                <span class="value">@c.VinLast</span>
+                            </div>
+                        }
+
+                        @if (!string.IsNullOrWhiteSpace(c.WmiLast))
+                        {
+                            <div class="cs-stat">
+                                <span class="label">WMI</span>
+                                <span class="value">@c.WmiLast</span>
+                            </div>
+                        }
+
+                        @if (c.YearDetected is int yd)
+                        {
+                            <div class="cs-stat">
+                                <span class="label">Year (from VIN)</span>
+                                <span class="value">@yd</span>
+                            </div>
+                        }
+
+                        @if (c.CalIds is { Count: > 0 })
+                        {
+                            <div class="cs-stat">
+                                <span class="label">CAL IDs</span>
+                                <span class="value">@PreviewList(c.CalIds)</span>
+                            </div>
+                        }
+
+                        @if (c.SupportedPidsCache is { Count: > 0 })
+                        {
+                            <div class="cs-stat">
+                                <span class="label">Supported PIDs</span>
+                                <span class="value">@($"{c.SupportedPidsCache.Count} total — " + PreviewList(c.SupportedPidsCache, 8))</span>
+                            </div>
+                        }
+
+                        @if (c.DesiredMode01Pids is { Count: > 0 })
+                        {
+                            <div class="cs-stat">
+                                <span class="label">Desired PIDs</span>
+                                <span class="value">@PreviewList(c.DesiredMode01Pids, 8)</span>
+                            </div>
+                        }
+
+                        @if (c.LastConnectedUtc != default)
+                        {
+                            <div class="cs-stat">
+                                <span class="label">Last Connected</span>
+                                <span class="value">@FormatUtc(c.LastConnectedUtc)</span>
+                            </div>
+                        }
+                    </details>
+
                     <div style="display:flex;gap:8px;margin-top:10px">
                         <button class="cs-btn primary" @onclick="() => MakeActive(c)">Set Active</button>
                         <button class="cs-btn" @onclick="() => StartEdit(c)">✏️ Edit</button>
@@ -136,7 +206,6 @@ else
 
     private sealed class EditDto
     {
-        public string PreferredTransport { get; set; } = "BLE";
         public string? PreferredAdapterName { get; set; }
         public int? TachMaxRpm { get; set; }
         public int? TachRedlineStart { get; set; }
@@ -174,7 +243,6 @@ else
         _editingKey = KeyOf(v);
         _edit = new EditDto
         {
-            PreferredTransport = string.IsNullOrWhiteSpace(v.PreferredTransport) ? "BLE" : v.PreferredTransport!,
             PreferredAdapterName = v.PreferredAdapterName,
             TachMaxRpm = v.TachMaxRpm,
             TachRedlineStart = v.TachRedlineStart,
@@ -192,7 +260,6 @@ else
     {
         if (_cars is null) return;
 
-        // Upsert: rebuild a new VehicleProfile preserving identity-ish fields
         var updated = new VehicleProfile
         {
             Id = string.IsNullOrWhiteSpace(original.Id) ? Guid.NewGuid().ToString("N") : original.Id,
@@ -201,34 +268,34 @@ else
             Model = original.Model,
             Engine = original.Engine,
 
-            PreferredTransport = _edit.PreferredTransport,
+            // editable in the UI
+            PreferredTransport = original.PreferredTransport,
             PreferredAdapterName = _edit.PreferredAdapterName,
+            TachMaxRpm = _edit.TachMaxRpm,
+            TachRedlineStart = _edit.TachRedlineStart,
+            SpeedMaxMph = _edit.SpeedMaxMph,
 
+            // keep any previously learned/advanced settings
             ProtocolHint = original.ProtocolHint,
             ProtocolDetected = original.ProtocolDetected,
             InitScript = original.InitScript?.ToList() ?? new(),
             DesiredMode01Pids = original.DesiredMode01Pids?.ToList() ?? new(),
             SupportedPidsCache = original.SupportedPidsCache?.ToList(),
-            VinCached = original.VinCached,
-
-            TachMaxRpm = _edit.TachMaxRpm,
-            TachRedlineStart = _edit.TachRedlineStart,
-            SpeedMaxMph = _edit.SpeedMaxMph
+            VinLast = original.VinLast,
+            WmiLast = original.WmiLast,
+            YearDetected = original.YearDetected,
+            CalIds = original.CalIds?.ToList(),
+            LastConnectedUtc = original.LastConnectedUtc
         };
 
-        // Replace in local list by Y/M/M (your original key)
         var i = _cars.FindIndex(c => SameCar(c, original));
         if (i >= 0) _cars[i] = updated;
 
-        // Persist via storage directly (keeps original behavior),
-        // plus keep service in sync by resetting the whole list.
         await Storage.SetAsync(AppKeys.VehicleProfiles, _cars);
-        if (Profiles.Current is not null && SameCar(Profiles.Current, original))
-        {
-            await Profiles.SetCurrentAsync(updated);
-        }
 
-        // Also refresh service’s in-memory garage
+        if (Profiles.Current is not null && SameCar(Profiles.Current, original))
+            await Profiles.SetCurrentAsync(updated);
+
         await Profiles.LoadAsync();
 
         CancelEdit();
@@ -278,5 +345,27 @@ else
     }
 
     private static string DisplayTransport(string? t)
-        => string.IsNullOrWhiteSpace(t) ? "BLE" : t!;
+    {
+        if (string.IsNullOrWhiteSpace(t)) return "Auto";
+        return t; // e.g., "BLE", "WIFI", "USB"
+    }
+
+    private static string PreviewList(IEnumerable<string>? items, int max = 5)
+    {
+        if (items is null) return "—";
+        var list = items.Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+        if (list.Count == 0) return "—";
+        var head = list.Take(max).ToList();
+        return head.Count == list.Count
+            ? string.Join(", ", head)
+            : $"{string.Join(", ", head)} … (+{list.Count - head.Count})";
+    }
+
+    private static string FormatUtc(DateTime? dt)
+    {
+        if (dt is null || dt == default) return "—";
+        // Show local time nicely; fallback to UTC if needed
+        var local = dt.Value.ToLocalTime();
+        return local.ToString("yyyy-MM-dd HH:mm");
+    }
 }

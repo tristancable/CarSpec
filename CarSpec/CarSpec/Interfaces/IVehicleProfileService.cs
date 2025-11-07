@@ -9,18 +9,20 @@ namespace CarSpec.Interfaces
 
         Task LoadAsync();
         Task<List<VehicleProfile>> GetAllAsync();
+
         Task SetCurrentAsync(VehicleProfile profile);
 
-        // Legacy convenience (keep old callers working)
+        // Convenience (legacy) setter used by older pages
         void Set(VehicleProfile profile);
 
-        // NEW: used by Garage.razor
+        // Garage operations
         Task AddAsync(VehicleProfile profile);
         Task RemoveAsync(string id);
 
-        // Learning from ECU
-        Task LearnFromFingerprintAsync(EcuFingerprint fp);
-
+        // Optional helper some code still uses
         VehicleProfile? Find(string year, string make, string model, string? engine = null);
+
+        // Called after a successful ECU fingerprint to persist learned info
+        Task LearnFromFingerprintAsync(EcuFingerprint fp, string transport = "BLE");
     }
 }

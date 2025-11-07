@@ -108,6 +108,9 @@ namespace CarSpec.Services.Obd
                     _lastFp = _adapter.LastFingerprint ?? await _adapter.ReadFingerprintAsync();
                     OnFingerprint?.Invoke(_lastFp);
 
+                    if (_lastFp is not null)
+                        await _profiles.LearnFromFingerprintAsync(_lastFp, transport: "BLE");
+
                     if (_lastFp?.Vin != null)
                         Log($"🪪 VIN: {_lastFp.Vin} (Year≈{_lastFp.Year?.ToString() ?? "?"}, Protocol={_lastFp.Protocol})");
 
@@ -225,13 +228,13 @@ namespace CarSpec.Services.Obd
                 try
                 {
                     _lastFp = _adapter.LastFingerprint ?? await _adapter.ReadFingerprintAsync();
+                    OnFingerprint?.Invoke(_lastFp);
 
                     if (_lastFp?.Vin != null)
-                        Log($"🪪 VIN: {_lastFp.Vin} (Year≈{_lastFp.Year?.ToString() ?? "?"}, Protocol={_lastFp.Protocol}, PIDs={_lastFp.SupportedPids.Count})");
+                        Log($"🪪 VIN: {_lastFp.Vin} (Year≈{_lastFp.Year?.ToString() ?? "?"}, Protocol={_lastFp.Protocol})");
 
-                    // Persist to the active profile for faster subsequent connects
-                    if (_lastFp is not null)
-                        await _profiles.LearnFromFingerprintAsync(_lastFp);
+                    // Persist the learned data (transport, protocol, VIN, PID map, etc.)
+                    await _profiles.LearnFromFingerprintAsync(_lastFp!, transport: "BLE");
                 }
                 catch (Exception ex)
                 {
@@ -371,7 +374,7 @@ namespace CarSpec.Services.Obd
                     if (!_registry.TryCreate(pid, out var datum)) continue;
 
                     // ★ CHANGED: honor adapter/profile-tuned timeout
-                    var resp = await _adapter!.SendCommandAsync(pid, timeoutMs: _pidTimeoutMs, retryStoppedOnce: true);
+                    var resp = await _adapter!.SendCommandAsync(pid, retryStoppedOnce: true);
                     var raw = (resp.RawResponse ?? string.Empty).ToUpperInvariant();
 
                     if (string.IsNullOrWhiteSpace(raw) || raw.Contains("NO DATA") || raw.Contains("?"))
