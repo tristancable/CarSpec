@@ -17,6 +17,7 @@ a {
 }
 
     a:hover {
+        color: var(--cs-sunrise);
         text-decoration: underline;
     }
 

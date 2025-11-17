@@ -1,6 +1,7 @@
 ﻿@page "/garage"
 @using CarSpec.Models
 @using CarSpec.Constants
+@using CarSpec.Utils.OBDData
 @using Microsoft.AspNetCore.Components.Forms
 @inject CarSpec.Interfaces.IAppStorage Storage
 @inject CarSpec.Interfaces.IVehicleProfileService Profiles
@@ -12,12 +13,6 @@
 {
     <p>Active Vehicle: <strong>@cur.Year @cur.Make @cur.Model</strong></p>
 }
-else
-{
-    <div class="cs-card warn" style="margin-bottom:12px">
-        No active vehicle selected. <a href="/garage">Choose one</a> or <a href="/setup">add a car</a>.
-    </div>
-}
 
 @if (_cars is null)
 {
@@ -25,7 +20,7 @@ else
 }
 else if (_cars.Count == 0)
 {
-    <div class="cs-card warn">No cars yet. <a href="/setup">Add one</a>.</div>
+    <div class="cs-card warn">No cars yet. <a href="/setup?new=true">Add one</a></div>
 }
 else
 {
@@ -42,15 +37,6 @@ else
                 @if (IsEditing(c))
                 {
                     <!-- Edit form -->
-                    <div class="cs-stat">
-                        <span class="label">Adapter Type</span>
-                        <InputSelect @bind-Value="_edit.PreferredTransport">
-                            <option value="BLE">BLE</option>
-                            <option value="WiFi">WiFi</option>
-                            <option value="USB">USB</option>
-                        </InputSelect>
-                    </div>
-
                     <div class="cs-stat">
                         <span class="label">Adapter Name</span>
                         <InputText @bind-Value="_edit.PreferredAdapterName" placeholder="e.g., VEEPEAK" />
@@ -79,10 +65,10 @@ else
                 else
                 {
                     <!-- Read-only stats -->
-                    <div class="cs-stat">
+                    @* <div class="cs-stat">
                         <span class="label">Adapter Type</span>
                         <span class="value">@DisplayTransport(c.PreferredTransport)</span>
-                    </div>
+                    </div> *@
 
                     @if (!string.IsNullOrWhiteSpace(c.PreferredAdapterName))
                     {
@@ -116,6 +102,87 @@ else
                         </div>
                     }
 
+                    <hr style="opacity:.25" />
+
+                    <!-- Learned on first successful connection -->
+                    <details style="margin-top:8px">
+                        <summary class="cs-link">Show learned ECU details</summary>
+                        @if (!string.IsNullOrWhiteSpace(c.PreferredTransport))
+                        {
+                            <div class="cs-stat">
+                                <span class="label">Adapter Type (preferred)</span>
+                                <span class="value">@c.PreferredTransport</span>
+                            </div>
+                        }
+
+                        @if (!string.IsNullOrWhiteSpace(c.ProtocolDetected))
+                        {
+                            <div class="cs-stat">
+                                <span class="label">Protocol (detected)</span>
+                                <span class="value">@c.ProtocolDetected</span>
+                            </div>
+                        }
+
+                        @if (!string.IsNullOrWhiteSpace(c.VinLast))
+                        {
+                            <div class="cs-stat">
+                                <span class="label">VIN</span>
+                                <span class="value">@c.VinLast</span>
+                            </div>
+                        }
+
+                        @if (!string.IsNullOrWhiteSpace(c.WmiLast))
+                        {
+                            <div class="cs-stat">
+                                <span class="label">WMI</span>
+                                <span class="value">@c.WmiLast</span>
+                            </div>
+                        }
+
+                        @if (c.YearDetected is int yd)
+                        {
+                            <div class="cs-stat">
+                                <span class="label">Year (from VIN)</span>
+                                <span class="value">@yd</span>
+                            </div>
+                        }
+
+                        @if (c.CalIds is { Count: > 0 })
+                        {
+                            <div class="cs-stat">
+                                <span class="label">CAL IDs</span>
+                                <span class="value">@PreviewList(c.CalIds)</span>
+                            </div>
+                        }
+
+                        @if (c.SupportedPidsCache is { Count: > 0 })
+                        {
+                            <div class="cs-stat">
+                                <span class="label">Supported PIDs</span>
+                                <span class="value">
+                                    @c.SupportedPidsCache.Count total —
+                                    <button class="cs-linkbtn" @onclick="() => OpenPidsModal(c)">View all</button>
+                                </span>
+                            </div>
+                        }
+
+                        @if (c.DesiredMode01Pids is { Count: > 0 })
+                        {
+                            <div class="cs-stat">
+                                <span class="label">Desired PIDs</span>
+                                <span class="value">@PreviewList(c.DesiredMode01Pids, 8)</span>
+                            </div>
+                        }
+
+                        @if (c.LastConnectedUtc.HasValue)
+                        {
+                            <div class="cs-stat">
+                                <span class="label">Last Connected</span>
+                                <span class="value">@FormatUtc(c.LastConnectedUtc)</span>
+                            </div>
+                        }
+                    </details>
+
                     <div style="display:flex;gap:8px;margin-top:10px">
                         <button class="cs-btn primary" @onclick="() => MakeActive(c)">Set Active</button>
                         <button class="cs-btn" @onclick="() => StartEdit(c)">✏️ Edit</button>
@@ -125,6 +192,42 @@ else
             </section>
         }
     </div>
+
+    @if (_showPidsModal)
+    {
+        <div class="cs-modal-backdrop" @onclick="ClosePidsModal">
+            <div class="cs-modal" @onclick:stopPropagation>
+                <div class="cs-modal__head">
+                    <h3 class="cs-modal__title cs-title">
+                        Supported PIDs — @_modalTitle
+                        <span class="cs-modal__count">(@_filteredPids.Count())</span>
+                    </h3>
+                    @* <button class="cs-btn btn-secondary" @onclick="ClosePidsModal">Close</button> *@
+                </div>
+
+                <div class="pid-toolbar">
+                    <input class="pid-search" placeholder="Filter PIDs or names…"
+                           @bind="_pidQuery" @bind:event="oninput" />
+                </div>
+
+                <div class="pid-scroll">
+                    <div class="pid-grid">
+                        @foreach (var (pid, name) in _filteredPids)
+                        {
+                            <div class="pid-chip @(name is null ? "pid-unknown" : null)">
+                                <div class="pid-code">@pid</div>
+                                <div class="pid-name">@((name ?? "Unknown"))</div>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <div class="cs-modal__foot">
+                    <button class="cs-btn primary" @onclick="ClosePidsModal">Close</button>
+                </div>
+            </div>
+        </div>
+    }
 }
 
 @code {
@@ -133,10 +236,14 @@ else
     // --- Edit state ---
     private string? _editingKey; // Year|Make|Model
     private EditDto _edit = new();
+    private bool _showPidsModal;
+    private List<string> _modalPids = new();
+    private string _modalTitle = string.Empty;
+    private string _pidQuery = string.Empty;
+    private List<(string pid, string? name)> _modalEntries = new();
 
     private sealed class EditDto
     {
-        public string PreferredTransport { get; set; } = "BLE";
         public string? PreferredAdapterName { get; set; }
         public int? TachMaxRpm { get; set; }
         public int? TachRedlineStart { get; set; }
@@ -146,34 +253,33 @@ else
     private static string KeyOf(VehicleProfile v) => $"{v.Year}|{v.Make}|{v.Model}";
     private bool IsEditing(VehicleProfile v) => _editingKey == KeyOf(v);
 
+    private async Task RefreshCarsAsync()
+    {
+        await Profiles.LoadAsync();
+        _cars = await Profiles.GetAllAsync();
+        StateHasChanged();
+    }
+
     protected override async Task OnInitializedAsync()
     {
-        // Ensure Profiles.Current is loaded from storage
-        await Profiles.LoadAsync();
+        await RefreshCarsAsync();
 
-        _cars = await Storage.GetAsync<List<VehicleProfile>>(AppKeys.VehicleProfiles)
-                ?? new List<VehicleProfile>();
-
-        // Seed once from current profile if list is empty
-        if (_cars.Count == 0)
+        // If empty, seed from Current once (optional)
+        if (_cars!.Count == 0 && Profiles.Current is VehicleProfile cur && !string.IsNullOrWhiteSpace(cur.Model))
         {
-            var current = await Storage.GetAsync<VehicleProfile>(AppKeys.VehicleProfile);
-            if (current is not null && !_cars.Any(v => SameCar(v, current)))
-            {
-                _cars.Add(current);
-                await Storage.SetAsync(AppKeys.VehicleProfiles, _cars);
-            }
+            await Profiles.AddAsync(cur);
+            await RefreshCarsAsync();
         }
     }
 
-    private void AddNew() => Nav.NavigateTo("/setup");
+    private void AddNew() => Nav.NavigateTo("/setup?new=true");
 
     private async Task MakeActive(VehicleProfile v)
     {
-        await Storage.SetAsync(AppKeys.VehicleProfile, v);
+        await Profiles.SetCurrentAsync(v);
         await Storage.SetAsync(AppKeys.SetupCompleted, true);
-        Profiles.Set(v); // keep memory Current in sync
         StateHasChanged();
+        await RefreshCarsAsync();
     }
 
     private void StartEdit(VehicleProfile v)
@@ -181,11 +287,10 @@ else
         _editingKey = KeyOf(v);
         _edit = new EditDto
         {
-            PreferredTransport   = string.IsNullOrWhiteSpace(v.PreferredTransport) ? "BLE" : v.PreferredTransport,
             PreferredAdapterName = v.PreferredAdapterName,
-            TachMaxRpm           = v.TachMaxRpm,
-            TachRedlineStart     = v.TachRedlineStart,
-            SpeedMaxMph          = v.SpeedMaxMph
+            TachMaxRpm = v.TachMaxRpm,
+            TachRedlineStart = v.TachRedlineStart,
+            SpeedMaxMph = v.SpeedMaxMph
         };
     }
 
@@ -199,43 +304,45 @@ else
     {
         if (_cars is null) return;
 
-        // Build a NEW VehicleProfile (init-only props)
         var updated = new VehicleProfile
         {
+            Id = string.IsNullOrWhiteSpace(original.Id) ? Guid.NewGuid().ToString("N") : original.Id,
             Year = original.Year,
             Make = original.Make,
             Model = original.Model,
             Engine = original.Engine,
 
-            PreferredTransport   = _edit.PreferredTransport,
+            // editable in the UI
+            PreferredTransport = original.PreferredTransport,
             PreferredAdapterName = _edit.PreferredAdapterName,
-
-            ProtocolHint = original.ProtocolHint,
-            InitScript = original.InitScript?.ToList() ?? new(),
-            DesiredMode01Pids = original.DesiredMode01Pids?.ToList() ?? new(),
-
             TachMaxRpm = _edit.TachMaxRpm,
             TachRedlineStart = _edit.TachRedlineStart,
-            SpeedMaxMph = _edit.SpeedMaxMph
+            SpeedMaxMph = _edit.SpeedMaxMph,
+
+            // keep any previously learned/advanced settings
+            ProtocolHint = original.ProtocolHint,
+            ProtocolDetected = original.ProtocolDetected,
+            InitScript = original.InitScript?.ToList() ?? new(),
+            DesiredMode01Pids = original.DesiredMode01Pids?.ToList() ?? new(),
+            SupportedPidsCache = original.SupportedPidsCache?.ToList(),
+            VinLast = original.VinLast,
+            WmiLast = original.WmiLast,
+            YearDetected = original.YearDetected,
+            CalIds = original.CalIds?.ToList(),
+            LastConnectedUtc = original.LastConnectedUtc
         };
 
-        // Replace in garage list
         var i = _cars.FindIndex(c => SameCar(c, original));
         if (i >= 0) _cars[i] = updated;
 
-        // Persist garage
-        await Storage.SetAsync(AppKeys.VehicleProfiles, _cars);
+        if (Profiles.Current is not null && SameCar(Profiles.Current, original))
+            await Profiles.SetCurrentAsync(updated);
 
-        // If this was the active car, update active storage too
-        var current = await Storage.GetAsync<VehicleProfile>(AppKeys.VehicleProfile);
-        if (current is not null && SameCar(current, original))
-        {
-            await Storage.SetAsync(AppKeys.VehicleProfile, updated);
-            Profiles.Set(updated);
-        }
+        await Profiles.LoadAsync();
 
         CancelEdit();
         StateHasChanged();
+        await RefreshCarsAsync();
     }
 
     private static bool SameCar(VehicleProfile a, VehicleProfile b) =>
@@ -245,31 +352,95 @@ else
     {
         if (_cars is null) return;
 
-        _cars.RemoveAll(x => SameCar(x, v));
-        await Storage.SetAsync(AppKeys.VehicleProfiles, _cars);
-
-        var current = await Storage.GetAsync<VehicleProfile>(AppKeys.VehicleProfile);
-        if (current is not null && SameCar(current, v))
+        // Remove from service (preferred)
+        // If your service doesn’t have Remove by Y/M/M, use Id when available
+        if (!string.IsNullOrWhiteSpace(v.Id))
         {
-            await Storage.RemoveAsync(AppKeys.VehicleProfile);
-            await Storage.RemoveAsync(AppKeys.SetupCompleted);
+            await Profiles.RemoveAsync(v.Id);
+        }
+        else
+        {
+            // fallback: manual prune + persist (matches your original logic)
+            _cars.RemoveAll(x => SameCar(x, v));
+        }
 
-            if (_cars.Count > 0)
+        // If we deleted the active one, pick another (original behavior)
+        if (Profiles.Current is not null && SameCar(Profiles.Current, v))
+        {
+            var fresh = await Profiles.GetAllAsync();
+            if (fresh.Count > 0)
             {
-                var next = _cars[0];
-                await Storage.SetAsync(AppKeys.VehicleProfile, next);
+                await Profiles.SetCurrentAsync(fresh[0]);
                 await Storage.SetAsync(AppKeys.SetupCompleted, true);
-                Profiles.Set(next);
             }
             else
             {
                 Profiles.Set(new VehicleProfile());
+                await Storage.RemoveAsync(AppKeys.VehicleProfile);
+                await Storage.RemoveAsync(AppKeys.SetupCompleted);
             }
         }
 
+        // Reload for UI
+        _cars = await Profiles.GetAllAsync();
         StateHasChanged();
+        await RefreshCarsAsync();
     }
 
     private static string DisplayTransport(string? t)
-        => string.IsNullOrWhiteSpace(t) ? "BLE" : t;
+    {
+        if (string.IsNullOrWhiteSpace(t)) return "Auto";
+        return t; // e.g., "BLE", "WIFI", "USB"
+    }
+
+    private static string PreviewList(IEnumerable<string>? items, int max = 5)
+    {
+        if (items is null) return "—";
+        var list = items.Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+        if (list.Count == 0) return "—";
+        var head = list.Take(max).ToList();
+        return head.Count == list.Count
+            ? string.Join(", ", head)
+            : $"{string.Join(", ", head)} … (+{list.Count - head.Count})";
+    }
+
+    private static string FormatUtc(DateTime? dt)
+    {
+        if (dt is null || dt == default) return "—";
+        // Show local time nicely; fallback to UTC if needed
+        var local = dt.Value.ToLocalTime();
+        return local.ToString("yyyy-MM-dd HH:mm");
+    }
+
+    private IEnumerable<(string pid, string? name)> _filteredPids =>
+        string.IsNullOrWhiteSpace(_pidQuery)
+            ? _modalEntries
+            : _modalEntries.Where(e =>
+                  e.pid.Contains(_pidQuery, StringComparison.OrdinalIgnoreCase) ||
+                  (e.name?.Contains(_pidQuery, StringComparison.OrdinalIgnoreCase) ?? false));
+
+    private void OpenPidsModal(VehicleProfile v)
+    {
+        var pids = (v.SupportedPidsCache ?? new List<string>())
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s.Trim().ToUpperInvariant())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(s => s)
+            .ToList();
+
+        _modalEntries = pids
+            .Select(pid => (pid, ObdPidCatalog.GetName(pid)))
+            .ToList();
+
+        _modalTitle = $"{v.Year} {v.Make} {v.Model}";
+        _pidQuery = string.Empty;
+        _showPidsModal = true;
+    }
+
+    private void ClosePidsModal()
+    {
+        _showPidsModal = false;
+        _modalPids.Clear();
+        _modalTitle = string.Empty;
+    }
 }

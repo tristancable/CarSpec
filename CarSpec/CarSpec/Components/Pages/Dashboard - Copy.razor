@@ -1,5 +1,5 @@
-﻿@page "/"
-@page "/dashboard"
+﻿@page "/main"
+@page "/dashboardbackup"
 @using CarSpec.Models
 @using CarSpec.Utils
 @using CarSpec.Services.Telemetry
@@ -13,56 +13,7 @@
 @implements IAsyncDisposable
 
 <div class="container">
-    <h1 class="cs-title" style="font-size:26px;margin:2px 0 6px">CarSpec Dashboard</h1>
-
-    <div class="recplay-float rec-toolbar compact">
-        @* RECORD *@
-        @if (!_isReplaying)
-        {
-            @if (!_isRecording)
-            {
-                <button class="cs-iconbtn" title="Start recording" aria-label="Start recording"
-                        @onclick="StartRecording" disabled="@(!ObdService.IsEcuConnected || ObdService.SimulationMode)">⏺</button>
-            }
-            else
-            {
-                <button class="cs-iconbtn" title="Stop recording" aria-label="Stop recording"
-                        @onclick="StopRecording">⏹</button>
-            }
-        }
-
-        @* REPLAY *@
-        <div class="cs-badge cs-badge--panel compact-chip">
-        <select class="cs-input cs-input--sm" style="min-width:160px"
-                value="@_selectedReplayId" @onchange="OnReplayChanged" aria-label="Replay selection">
-            <option value="">(none)</option>
-            @foreach (var r in _replays)
-            {
-                <option value="@r.Id">
-                    @($"{(r.Vehicle ?? "Unknown")} — {FormatMs(r.DurationMs)} — {r.CreatedUtc.ToLocalTime():g}")
-                </option>
-            }
-        </select>
-
-        @if (!_isReplaying)
-        {
-            <button class="cs-iconbtn" title="Play replay" aria-label="Play replay"
-                    @onclick="StartReplay" disabled="@string.IsNullOrWhiteSpace(_selectedReplayId)">▶</button>
-        }
-        else
-        {
-            <button class="cs-iconbtn" title="Stop replay" aria-label="Stop replay" @onclick="StopReplay">⏹</button>
-        }
-
-        <select class="cs-input cs-input--sm speed-dd" @onchange="OnReplaySpeedChanged" aria-label="Replay speed">
-            <option value="0.5">0.5×</option>
-            <option value="1">1×</option>
-            <option value="1.5">1.5×</option>
-            <option value="2">2×</option>
-            <option value="3">3×</option>
-        </select>
-        </div>
-    </div>
+    <h1 class="cs-title" style="font-size:26px;margin:6px 0 12px">CarSpec Dashboard</h1>
 
     @if (_needsSetup || Profiles?.Current == null)
     {
@@ -79,38 +30,98 @@
         </div>
     }
 
-    <div class="cs-controls header-bar">
-      <div class="header-left">
-        <div class="cs-badge cs-badge--panel">
-          <span class="label">Mode:</span>
-          <span class="cs-pill @(GetModeClass())">@GetModeText()</span>
+    <div class="cs-controls" style="justify-content:space-between;">
+        <div style="display:flex;gap:16px;align-items:center;">
+            <div class="cs-badge cs-badge--panel">
+                <span class="label">Mode:</span>
+                <span class="cs-pill @(GetModeClass())">@GetModeText()</span>
+            </div>
+
+            @if (!ObdService.IsAdapterConnected)
+            {
+                @if (!ObdService.IsConnecting)
+                {
+                    <button class="cs-btn primary" @onclick="SwitchToLive" disabled="@_needsSetup">
+                        🔌 Connect to OBD
+                    </button>
+                }
+                else
+                {
+                    <button class="cs-btn btn-secondary" @onclick="CancelConnecting" disabled="@_needsSetup">
+                        ⛔ Stop Connecting
+                    </button>
+                }
+            }
+            else if (ObdService.IsAdapterConnected && !ObdService.IsEcuConnected)
+            {
+                <button class="cs-btn btn-secondary" @onclick="ReconnectEcu" disabled="@_needsSetup">
+                    🔁 Reconnect ECU
+                </button>
+                <button class="cs-btn btn-secondary" @onclick="Disconnect" disabled="@_needsSetup">
+                    🔌 Disconnect OBD
+                </button>
+            }
+            else if (ObdService.IsEcuConnected)
+            {
+                <button class="cs-btn btn-secondary" @onclick="Disconnect" disabled="@_needsSetup">
+                    🔌 Disconnect OBD
+                </button>
+            }
         </div>
 
-        @* Connect / Disconnect buttons *@
-        @if (!ObdService.IsAdapterConnected)
-        {
-            @if (!ObdService.IsConnecting)
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:8px">
+            @* RECORDING *@
+            @if (!_isReplaying)
             {
-                <button class="cs-btn primary" @onclick="SwitchToLive" disabled="@_needsSetup">
-                    🔌 Connect to OBD
-                </button>
+                @if (!_isRecording)
+                {
+                    <button class="cs-btn" @onclick="StartRecording" disabled="@_needsSetup || !ObdService.IsEcuConnected">
+                        ⏺️ Start Recording
+                    </button>
+                }
+                else
+                {
+                    <button class="cs-btn btn-secondary" @onclick="StopRecording">
+                        ⏹️ Stop Recording
+                    </button>
+                }
             }
-            else
-            {
-                <button class="cs-btn btn-secondary" @onclick="CancelConnecting" disabled="@_needsSetup">
-                    ⛔ Stop Connecting
-                </button>
-            }
-        }
-        else if (ObdService.IsAdapterConnected && !ObdService.IsEcuConnected)
-        {
-            <button class="cs-btn btn-secondary" @onclick="ReconnectEcu" disabled="@_needsSetup">🔁 Reconnect ECU</button>
-            <button class="cs-btn btn-secondary" @onclick="Disconnect" disabled="@_needsSetup">🔌 Disconnect OBD</button>
-        }
-        else if (ObdService.IsEcuConnected)
-        {
-            <button class="cs-btn btn-secondary" @onclick="Disconnect" disabled="@_needsSetup">🔌 Disconnect OBD</button>
-        }
+
+            @* REPLAY *@
+            <div class="cs-badge cs-badge--panel" style="gap:8px">
+                <span class="label">Replay:</span>
+
+                <select class="cs-input" style="min-width:220px"
+                        value="@_selectedReplayId"
+                        @onchange="OnReplayChanged">
+                    <option value="">(none)</option>
+                    @foreach (var r in _replays)
+                    {
+                        <option value="@r.Id">@($"{(r.Vehicle ?? "Unknown")} — {FormatMs(r.DurationMs)} — {r.CreatedUtc.ToLocalTime():g}")</option>
+                    }
+                </select>
+
+                @if (!_isReplaying)
+                {
+                    <button class="cs-btn" @onclick="StartReplay" disabled="@string.IsNullOrWhiteSpace(_selectedReplayId)">
+                        ▶️ Play
+                    </button>
+                }
+                else
+                {
+                    <button class="cs-btn btn-secondary" @onclick="StopReplay">⏹️ Stop</button>
+                }
+
+                <label style="margin-left:8px;opacity:.8">Speed</label>
+                <select class="cs-input" style="width:90px" @onchange="OnReplaySpeedChanged">
+                    <option value="0.5">0.5×</option>
+                    <option value="1">1×</option>
+                    <option value="1.5">1.5×</option>
+                    <option value="2">2×</option>
+                    <option value="3">3×</option>
+                </select>
+            </div>
+        </div>
 
         <div class="cs-seg-icons" role="tablist" aria-label="Display mode">
             <button class="seg @( _view == DisplayMode.Gauges ? "active" : null )"
@@ -133,7 +144,6 @@
                 </svg>
             </button>
         </div>
-    </div>
     </div>
 
     @if (ObdService.IsEcuConnected)
@@ -160,7 +170,7 @@
     }
     else
     {
-        @if (ShouldRenderGauges)
+        @if (ObdService.IsEcuConnected && _planKnown)
         {
             <div class="cs-grid @( _view == DisplayMode.Gauges ? "" : "is-hidden")" style="margin-bottom:18px">
                 @if (CanShow(PID_RPM))
@@ -435,7 +445,7 @@
                 }
             </div>
         }
-        else if (IsLive && !_planKnown)
+        else if (ObdService.IsEcuConnected && !_planKnown)
         {
             <div class="cs-card info" style="margin-bottom:12px">
                 Detecting supported sensors for this vehicle…
@@ -476,9 +486,6 @@
     private string _selectedReplayId = "";
     private bool _isReplaying;
     private double _replaySpeed = 1.0;
-    private bool IsLive => ObdService.IsEcuConnected && !ObdService.SimulationMode;
-    private bool ShouldRenderGauges => _isReplaying || (IsLive && _planKnown);
-    private bool _isPreparingReplay;
 
     private IJSObjectReference? gaugeModule;
     private bool gaugeReady;
@@ -488,11 +495,7 @@
     // --- PID-aware UI state ---
     private HashSet<string> _plan = new(StringComparer.OrdinalIgnoreCase);
     private bool _planKnown => _plan.Count > 0;
-    private bool CanShow(string pid)
-    {
-        if (_isReplaying) return true;
-        return _plan.Contains(pid);
-    }
+    private bool CanShow(string pid) => _plan.Contains(pid);
 
     // PID constants
     private const string PID_RPM = "010C";
@@ -565,6 +568,8 @@
 
         if (!_needsSetup && ObdService.IsEcuConnected && !ObdService.SimulationMode)
             await AttachLiveStreamAsync();
+        else
+            StartSimulationLoop();
     }
 
     private async Task RecomputeNeedsSetupAsync()
@@ -696,36 +701,23 @@
 
     private async Task StartReplay()
     {
-        if (string.IsNullOrWhiteSpace(_selectedReplayId) || _isPreparingReplay) return;
+        if (string.IsNullOrWhiteSpace(_selectedReplayId)) return;
 
-        _isPreparingReplay = true;
-        StateHasChanged();
-
+        // Ensure we’re not recording and not connected
         if (_isRecording) await StopRecording();
+
         await ObdService.Disconnect();
-        ObdService.SimulationMode = true;
+        ObdService.SimulationMode = true; // make sure live loop won’t fight replay
 
         _isReplaying = true;
-        StateHasChanged();
-
-        // If the user is on Gauges, ensure canvases + init BEFORE frames
-        if (_view == DisplayMode.Gauges)
-        {
-            gaugeReady = false;          // force a fresh init
-            await DisposeGaugesAsync(all: true);
-            await ZeroOutDataAsync();    // safe baseline
-            StateHasChanged();
-            await Task.Yield();          // let DOM paint canvases
-            await EnsureGaugesInitializedAsync();
-            await Task.Delay(16);        // let layout settle
-        }
-
-        _isPreparingReplay = false;
-        StateHasChanged();
-
         double speed = _replaySpeed <= 0 ? 1.0 : _replaySpeed;
+
         Log($"▶️ Starting replay {_selectedReplayId} at {speed:0.##}×");
 
+        // Seed gauges quickly with zeros (optional)
+        await ZeroOutDataAsync();
+
+        // Pump frames into dashboard just like live
         await Replayer.StartAsync(
             _selectedReplayId,
             onFrame: async cd =>
@@ -733,20 +725,19 @@
                 await InvokeAsync(async () =>
                 {
                     carData = cd;
-                    await SafeSetAllGaugesAsync(); // no init here; already done if Gauges
+                    // No plan from replay; show everything you recorded:
+                    if (_view == DisplayMode.Gauges && !gaugeReady)
+                        await EnsureGaugesInitializedAsync();
+
+                    await SafeSetAllGaugesAsync();
                     StateHasChanged();
                 });
             },
             onStop: () =>
             {
                 _isReplaying = false;
-                _ = InvokeAsync(async () =>
-                {
-                    await DisposeGaugesAsync(all: true);
-                    gaugeReady = false;
-                    StateHasChanged();
-                });
                 Log("⏹️ Replay finished.");
+                InvokeAsync(StateHasChanged);
             },
             speed: speed
         );
@@ -771,11 +762,9 @@
 
     private async Task EnsureGaugesInitializedAsync()
     {
-        if (gaugeReady || _view != DisplayMode.Gauges || !ShouldRenderGauges) return;
+        if (gaugeReady || _view != DisplayMode.Gauges) return;
 
         gaugeModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/carspec.gauges.js");
-
-        await DisposeGaugesAsync(all: true);
 
         if (CanShow(PID_RPM))
         {
@@ -942,22 +931,13 @@
 
     private async Task SwitchView(DisplayMode v)
     {
-        var wasGauges = _view == DisplayMode.Gauges;
         _view = v;
         StateHasChanged();
 
-        if (wasGauges && v != DisplayMode.Gauges)
-        {
-            await DisposeGaugesAsync(all: true);
-            gaugeReady = false;
-        }
-
         if (v == DisplayMode.Gauges)
         {
-            // We (re)entered Gauges; always ensure fresh init because DOM canvases are new
-            gaugeReady = false;
-            await Task.Yield();                  // wait for canvases to mount
-            await EnsureGaugesInitializedAsync();
+            if (!gaugeReady) await EnsureGaugesInitializedAsync();
+            await Task.Delay(30);
             if (gaugeModule is not null) await gaugeModule.InvokeVoidAsync("refreshOnShow");
         }
     }
@@ -1165,7 +1145,7 @@
     {
         await ObdService.Disconnect();
         await InvokeAsync(StateHasChanged);
-        // ObdService.SimulationMode = true;
+        ObdService.SimulationMode = true;
     }
 
     private void HandleLog(string message)
@@ -1224,32 +1204,6 @@
 
         Replayer.Stop();
         if (_isRecording) try { await Recorder.StopAsync(); } catch { }
-    }
-
-    private static readonly string[] GaugeIds = new[]
-    {
-        "rpmGauge","speedGauge","throttleGauge","fuelGauge","coolantGauge",
-        "oilGauge","iatGauge","loadGauge","fpGauge","mapGauge","tadvGauge","mafGauge"
-    };
-
-    private async Task DisposeGaugesAsync(bool all = false)
-    {
-        if (gaugeModule is null) return;
-        try
-        {
-            if (all)
-            {
-                await gaugeModule.InvokeVoidAsync("disposeAll");
-            }
-            else
-            {
-                foreach (var id in GaugeIds)
-                {
-                    try { await gaugeModule.InvokeVoidAsync("dispose", id); } catch { /* ignore */ }
-                }
-            }
-        }
-        catch { /* ignore */ }
     }
 
     public void ClearLog()

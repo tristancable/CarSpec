@@ -1,4 +1,4 @@
-﻿@page "/bletest"
+﻿@page "/blescan"
 @using Plugin.BLE
 @using Plugin.BLE.Abstractions.Contracts
 @using Plugin.BLE.Abstractions.EventArgs
@@ -23,13 +23,16 @@ else
     <p>Scanning... Please wait ~10 seconds</p>
 }
 
-<h4>Discovered devices</h4>
-<ul>
-    @foreach (var d in devices)
-    {
-        <li>@(string.IsNullOrWhiteSpace(d.Name) ? "—" : d.Name) (@d.Id)</li>
-    }
-</ul>
+@if (devices.Count > 0)
+{
+    <h4>Discovered devices</h4>
+    <ul>
+        @foreach (var d in devices)
+        {
+            <li>@(string.IsNullOrWhiteSpace(d.Name) ? "—" : d.Name) (@d.Id)</li>
+        }
+    </ul>
+}
 
 @if (obdCandidates.Any())
 {

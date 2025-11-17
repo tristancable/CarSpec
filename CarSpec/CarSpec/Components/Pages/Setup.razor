@@ -1,5 +1,7 @@
 ﻿@page "/setup"
+@using Microsoft.AspNetCore.Components
 @using Microsoft.AspNetCore.Components.Forms
+@using System.ComponentModel.DataAnnotations
 @using CarSpec.Models
 @using CarSpec.Constants
 @inject CarSpec.Interfaces.IVehicleProfileService Profiles
@@ -8,220 +10,193 @@
 
 <h2 class="cs-title" style="margin:6px 0 12px">Vehicle Setup</h2>
 
-@if (catalog is null)
-{
-    <p>Loading…</p>
-}
-else
-{
-    <EditForm Model="form" OnValidSubmit="Save">
-        <div class="grid" style="display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
+<EditForm Model="form" OnValidSubmit="Save">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
 
+    <div class="cs-card setup-card">
+        <div class="setup-header">
             <div>
-                <label>Year</label>
-                <InputSelect @bind-Value="Year" TValue="string">
-                    <option value="">Select</option>
-                    @foreach (var y in years)
-                    {
-                        <option value="@y">@y</option>
-                    }
-                </InputSelect>
+                <h3 class="setup-title">Vehicle Setup</h3>
+                <p class="setup-sub">
+                    Enter your car once. We’ll detect protocol &amp; PIDs automatically on the first successful connection and save them to this profile.
+                </p>
+            </div>
+            <div class="setup-badge">Step 1 of 1</div>
+        </div>
+
+        <!-- Helpful hint to discover BLE name -->
+        <div class="setup-banner" style="margin:0 0 12px 0">
+          <div style="display:flex;align-items:flex-start;gap:12px">
+            <div class="icon">💡</div>
+            <div>
+              <strong>Need your adapter’s exact Bluetooth name?</strong>
+              Open the <a href="/BleTest">BleTest</a> page to scan for devices (e.g., <code>VEEPEAK</code>, <code>OBDII</code>).
+            </div>
+          </div>
+        </div>
+
+        <div class="form-grid">
+            <!-- Free-entry basics (no catalog) -->
+            <div class="form-row">
+                <label>Year <span class="hint hint--required">(required)</span></label>
+                <InputText class="cs-input" @bind-Value="form.Year" placeholder="e.g., 2002" />
+                <ValidationMessage For="@(() => form.Year)" />
             </div>
 
-            <div>
-                <label>Make</label>
-                <InputSelect @bind-Value="Make" TValue="string" disabled="@string.IsNullOrWhiteSpace(form.Year)">
-                    <option value="">Select</option>
-                    @foreach (var m in makes)
-                    {
-                        <option value="@m">@m</option>
-                    }
-                </InputSelect>
+            <div class="form-row">
+                <label>Make <span class="hint hint--required">(required)</span></label>
+                <InputText class="cs-input" @bind-Value="form.Make" placeholder="e.g., Subaru" />
+                <ValidationMessage For="@(() => form.Make)" />
             </div>
 
-            <div>
-                <label>Model</label>
-                <InputSelect @bind-Value="Model" TValue="string" disabled="@string.IsNullOrWhiteSpace(form.Make)">
-                    <option value="">Select</option>
-                    @foreach (var m in filteredModels)
-                    {
-                        <option value="@m">@m</option>
-                    }
-                </InputSelect>
+            <div class="form-row">
+                <label>Model <span class="hint hint--required">(required)</span></label>
+                <InputText class="cs-input" @bind-Value="form.Model" placeholder="e.g., WRX" />
+                <ValidationMessage For="@(() => form.Model)" />
             </div>
 
-            <div>
-                <label>Adapter Type</label>
-                <InputSelect @bind-Value="form.AdapterType">
-                    <option value="BLE">BLE</option>
-                    <option value="WiFi">WiFi</option>
-                    <option value="USB">USB</option>
-                </InputSelect>
+            <!-- BLE adapter name REQUIRED -->
+            <div class="form-row span-2">
+                <label>Bluetooth OBD Name <span class="hint hint--required">(required)</span></label>
+                <InputText class="cs-input" @bind-Value="form.AdapterNamePrimary" placeholder="Exact advertised name (e.g., VEEPEAK)" />
+                <ValidationMessage For="@(() => form.AdapterNamePrimary)" />
+                <small style="opacity:.85">Must match what your device shows during Bluetooth scan.</small>
             </div>
 
-            <div>
-                <label>Adapter Name (optional)</label>
-                <InputText @bind-Value="form.AdapterNamePrimary" placeholder="e.g., VEEPEAK" />
+            <!-- Optional performance presets -->
+            <div class="form-row">
+                <label>Redline Start <span class="unit">rpm</span> <span class="hint hint--optional">(optional)</span></label>
+                <InputNumber class="cs-input" @bind-Value="form.RedlineStart" placeholder="(default 7000)" />
+            </div>
+
+            <div class="form-row">
+                <label>Redline End / Max RPM <span class="hint hint--optional">(optional)</span></label>
+                <InputNumber class="cs-input" @bind-Value="form.RedlineEnd" placeholder="(default 9000)" />
+            </div>
+
+            <div class="form-row">
+                <label>Max Speed <span class="unit">mph</span> <span class="hint hint--optional">(optional)</span></label>
+                <InputNumber class="cs-input" @bind-Value="form.MaxSpeedMph" placeholder="(default 140)" />
             </div>
         </div>
 
-        <div style="margin-top:12px;display:flex;gap:8px;">
+        <div class="actions">
             <button class="cs-btn primary" type="submit" disabled="@(!CanSave())">Save</button>
             <button class="cs-btn btn-secondary" type="button" @onclick="Cancel">Cancel</button>
         </div>
-    </EditForm>
-}
+    </div>
+</EditForm>
 
 @code {
-    // --- Plain DTO (no logic here) ---
+    [SupplyParameterFromQuery(Name = "new")]
+    public bool? New { get; set; }
+    private bool IsCreate => New == true;
+
     private sealed class VehicleForm
     {
+        [Required(ErrorMessage = "Year is required")]
         public string? Year { get; set; }
+
+        [Required(ErrorMessage = "Make is required")]
         public string? Make { get; set; }
+
+        [Required(ErrorMessage = "Model is required")]
         public string? Model { get; set; }
-        public string AdapterType { get; set; } = "BLE";
+
+        [Required(ErrorMessage = "Bluetooth OBD Name is required")]
+        [MinLength(2, ErrorMessage = "Adapter name looks too short")]
         public string? AdapterNamePrimary { get; set; }
+
+        public int? RedlineStart { get; set; }
+        public int? RedlineEnd { get; set; }
+        public int? MaxSpeedMph { get; set; }
     }
 
     private VehicleForm form = new();
-    private IReadOnlyList<VehicleProfile>? catalog;
-    private List<string> years = new();
-    private List<string> makes = new();
-    private List<string> filteredModels = new();
-
-    // --- Wrapper properties bound by the selects ---
-    private string? Year
-    {
-        get => form.Year;
-        set
-        {
-            if (form.Year == value) return;
-            form.Year = value;
-            RebuildMakesForYear();
-            // reset downstream
-            form.Make = string.Empty;
-            form.Model = string.Empty;
-            filteredModels.Clear();
-            StateHasChanged();
-        }
-    }
-
-    private string? Make
-    {
-        get => form.Make;
-        set
-        {
-            if (form.Make == value) return;
-            form.Make = value;
-            RebuildModelsForYearMake();
-            // reset model
-            form.Model = string.Empty;
-            StateHasChanged();
-        }
-    }
-
-    private string? Model
-    {
-        get => form.Model;
-        set
-        {
-            if (form.Model == value) return;
-            form.Model = value;
-            StateHasChanged();
-        }
-    }
-
-    protected override async Task OnInitializedAsync()
-    {
-        await Profiles.LoadAsync();
-        catalog = Profiles.All ?? Array.Empty<VehicleProfile>();
-
-        // Build year list (unique, trimmed, numeric-desc sort)
-        years = catalog
-            .Select(v => (v.Year ?? "").Trim())
-            .Where(y => !string.IsNullOrWhiteSpace(y))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderByDescending(y => int.TryParse(y, out var n) ? n : int.MinValue)
-            .ToList();
-
-        // Start empty until a year is chosen
-        makes.Clear();
-        filteredModels.Clear();
-    }
-
-    private void RebuildMakesForYear()
-    {
-        var year = (form.Year ?? "").Trim();
-
-        makes = (catalog ?? Array.Empty<VehicleProfile>())
-            .Where(v => string.Equals(v.Year?.Trim(), year, StringComparison.OrdinalIgnoreCase))
-            .Select(v => (v.Make ?? "").Trim())
-            .Where(m => !string.IsNullOrWhiteSpace(m))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(m => m)
-            .ToList();
-    }
-
-    private void RebuildModelsForYearMake()
-    {
-        var year = (form.Year ?? "").Trim();
-        var make = (form.Make ?? "").Trim();
-
-        filteredModels = (catalog ?? Array.Empty<VehicleProfile>())
-            .Where(v =>
-                string.Equals(v.Year?.Trim(), year, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(v.Make?.Trim(), make, StringComparison.OrdinalIgnoreCase))
-            .Select(v => (v.Model ?? "").Trim())
-            .Where(m => !string.IsNullOrWhiteSpace(m))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(m => m)
-            .ToList();
-    }
 
     private bool CanSave() =>
         !string.IsNullOrWhiteSpace(form.Year) &&
         !string.IsNullOrWhiteSpace(form.Make) &&
-        !string.IsNullOrWhiteSpace(form.Model);
+        !string.IsNullOrWhiteSpace(form.Model) &&
+        !string.IsNullOrWhiteSpace(form.AdapterNamePrimary);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Profiles.LoadAsync();
+        var cur = Profiles.Current;
+
+        if (!IsCreate && cur is not null)
+        {
+            form.Year               = cur.Year;
+            form.Make               = cur.Make;
+            form.Model              = cur.Model;
+            form.AdapterNamePrimary = cur.PreferredAdapterName;
+            form.RedlineStart       = cur.TachRedlineStart;
+            form.RedlineEnd         = cur.TachMaxRpm;
+            form.MaxSpeedMph        = cur.SpeedMaxMph;
+        }
+        else
+        {
+            form = new VehicleForm();
+        }
+    }
 
     private async Task Save()
     {
         if (!CanSave()) return;
 
-        var y = form.Year!.Trim();
-        var mk = form.Make!.Trim();
-        var md = form.Model!.Trim();
+        int redlineStart = form.RedlineStart ?? 7000;
+        int redlineEnd   = form.RedlineEnd   ?? 9000;
+        int maxSpeedMph  = form.MaxSpeedMph ?? 140;
+        if (redlineEnd <= redlineStart) redlineEnd = Math.Max(redlineStart + 500, 6000);
 
-        var all = Profiles.All ?? Array.Empty<VehicleProfile>();
-        var chosen = all.FirstOrDefault(v =>
-                            string.Equals(v.Year?.Trim(),  y,  StringComparison.OrdinalIgnoreCase) &&
-                            string.Equals(v.Make?.Trim(),  mk, StringComparison.OrdinalIgnoreCase) &&
-                            string.Equals(v.Model?.Trim(), md, StringComparison.OrdinalIgnoreCase))
-                     ?? new VehicleProfile
-                     {
-                         Year = y,
-                         Make = mk,
-                         Model = md,
-                         PreferredTransport   = form.AdapterType,
-                         PreferredAdapterName = form.AdapterNamePrimary ?? ""
-                     };
+        await Profiles.LoadAsync();
 
-        await Storage.SetAsync(AppKeys.VehicleProfile, chosen);
+        if (IsCreate || Profiles.Current is null)
+        {
+            var vp = new VehicleProfile {
+                Id = Guid.NewGuid().ToString("N"),
+                Year = form.Year!.Trim(),
+                Make = form.Make!.Trim(),
+                Model = form.Model!.Trim(),
+                PreferredAdapterName = form.AdapterNamePrimary!.Trim(),
+                TachRedlineStart = redlineStart,
+                TachMaxRpm       = redlineEnd,
+                SpeedMaxMph      = maxSpeedMph,
+
+                ProtocolDetected   = null,
+                SupportedPidsCache = null,
+                LastConnectedUtc   = default
+            };
+
+            await Profiles.AddAsync(vp);
+            await Profiles.SetCurrentAsync(vp);
+        }
+        else
+        {
+            // UPDATE existing profile
+            var vp = Profiles.Current!;
+            vp.Year = form.Year!.Trim();
+            vp.Make = form.Make!.Trim();
+            vp.Model = form.Model!.Trim();
+            vp.PreferredAdapterName = form.AdapterNamePrimary!.Trim();
+            vp.TachRedlineStart = redlineStart;
+            vp.TachMaxRpm       = redlineEnd;
+            vp.SpeedMaxMph      = maxSpeedMph;
+
+            // If your service exposes UpdateAsync, prefer it:
+            // await Profiles.UpdateAsync(vp);
+            await Profiles.SetCurrentAsync(vp);
+        }
+
+        // mark/setup; if you store a global flag, keep it. Better is per-profile id.
         await Storage.SetAsync(AppKeys.SetupCompleted, true);
+        await Storage.SetAsync(AppKeys.VehicleProfile, true);
 
-        var garage = await Storage.GetAsync<List<VehicleProfile>>(AppKeys.VehicleProfiles)
-                    ?? new List<VehicleProfile>();
-
-        bool exists = garage.Any(v =>
-            string.Equals(v.Year?.Trim(),  chosen.Year?.Trim(),  StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(v.Make?.Trim(),  chosen.Make?.Trim(),  StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(v.Model?.Trim(), chosen.Model?.Trim(), StringComparison.OrdinalIgnoreCase));
-
-        if (!exists) garage.Add(chosen);
-        await Storage.SetAsync(AppKeys.VehicleProfiles, garage);
-
-        Profiles.Set(chosen);
         Nav.NavigateTo("/garage");
     }
 
+    private void OpenBleTest() => Nav.NavigateTo("/blescan");
     private void Cancel() => Nav.NavigateTo("/garage");
 }

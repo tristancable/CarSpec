@@ -1,34 +1,41 @@
 ﻿namespace CarSpec.Models
 {
+    // CarSpec.Models.VehicleProfile
     public sealed class VehicleProfile
     {
-        public string Year { get; init; } = "";
-        public string Make { get; init; } = "";
-        public string Model { get; init; } = "";
-        public string Engine { get; init; } = "";
+        public string Id { get; set; } = Guid.NewGuid().ToString("N");
 
-        // Transport/adapter hints
-        public string PreferredTransport { get; init; } = "BLE"; // BLE|WIFI|SERIAL (future)
-        public string? PreferredAdapterName { get; init; }        // e.g., "VEEPEAK"
+        public string? Year { get; set; }
+        public string? Make { get; set; }
+        public string? Model { get; set; }
+        public string? Engine { get; set; }
 
-        // Protocol & init hints
-        public string ProtocolHint { get; init; } = "AUTO";       // AUTO, ISO9141, CAN11_500, CAN29_500...
-        public List<string> InitScript { get; init; } = new()
-        {
-            "ATE0", "ATL0", "ATS0", "ATAL", "ATAT1", "ATH1"
-        };
-        public string? CanHeaderTx { get; init; }                 // e.g., "7E0"
-        public string? CanHeaderRxFilter { get; init; }           // e.g., "7E8"
+        // User hints
+        public string? PreferredTransport { get; set; }     // learned after first connect
+        public string? PreferredAdapterName { get; set; }   // user-entered nickname
 
-        // PIDs to try (Mode 01)
-        public List<string> DesiredMode01Pids { get; init; } = new()
-        {
-            "010C", "010D", "0111", "012F", "0105", "010F", "015C"
-        };
+        // Learned/cached
+        public string? ProtocolHint { get; set; }           // (optional) manual hint
+        public string? ProtocolDetected { get; set; }       // learned
+        public List<string>? InitScript { get; set; }       // optional AT lines
+        public List<string>? DesiredMode01Pids { get; set; }
+        public List<string>? SupportedPidsCache { get; set; }
+        public string? VinLast { get; set; }
+        public string? WmiLast { get; set; }
+        public int? YearDetected { get; set; }
+        public List<string>? CalIds { get; set; }
+        public DateTime? LastConnectedUtc { get; set; }
 
         // Gauges
-        public int? TachMaxRpm { get; init; }
-        public int? TachRedlineStart { get; init; }
-        public int? SpeedMaxMph { get; init; }
+        public int? TachMaxRpm { get; set; }
+        public int? TachRedlineStart { get; set; }
+        public int? SpeedMaxMph { get; set; }
+
+        public string? LastKnownVin { get; set; }   // lock to this VIN once learned
+        public bool StrictProfileLock { get; set; } // optional: let user toggle (default false)
+
+        // 🔹 Add these two OPTIONAL CAN header props
+        public string? CanHeaderTx { get; set; }
+        public string? CanHeaderRxFilter { get; set; }
     }
 }

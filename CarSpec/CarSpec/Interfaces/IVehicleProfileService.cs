@@ -7,14 +7,24 @@ namespace CarSpec.Interfaces
         VehicleProfile? Current { get; }
         IReadOnlyList<VehicleProfile> All { get; }
 
-        Task LoadAsync();                   // loads vehicles.json (no-op if already loaded)
-        void Set(VehicleProfile profile);   // legacy setter (keep if others call it)
+        Task LoadAsync();
+        Task<List<VehicleProfile>> GetAllAsync();
 
-        // New helpers used by fingerprint flow / UI
-        Task<List<VehicleProfile>> GetAllAsync();         // enumerate vehicles.json
-        Task SetCurrentAsync(VehicleProfile profile);     // persist & set active
+        Task SetCurrentAsync(VehicleProfile profile);
 
-        // Optional helper
+        // Convenience (legacy) setter used by older pages
+        void Set(VehicleProfile profile);
+
+        // Garage operations
+        Task AddAsync(VehicleProfile profile);
+        Task RemoveAsync(string id);
+
+        // Optional helper some code still uses
         VehicleProfile? Find(string year, string make, string model, string? engine = null);
+
+        // Called after a successful ECU fingerprint to persist learned info
+        Task LearnFromFingerprintAsync(EcuFingerprint fp, string transport = "BLE");
+
+        Task UpsertAsync(VehicleProfile profile);
     }
 }

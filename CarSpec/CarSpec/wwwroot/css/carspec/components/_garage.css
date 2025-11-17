@@ -1,0 +1,140 @@
+﻿.cs-linkbtn {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    color: var(--cs-amber);
+    text-decoration: none;
+}
+
+    .cs-linkbtn:hover {
+        color: var(--cs-sunrise);
+        text-decoration: underline;
+    }
+
+/* ---- PID Modal ---- */
+.cs-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(0,0,0,.55);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.cs-modal {
+    width: min(980px, 92vw);
+    max-height: 82vh;
+    overflow: hidden;
+    background: #0f1218;
+    border: 1px solid var(--card-border, #1f2530);
+    border-radius: 18px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.45);
+    padding: 20px 20px 16px;
+}
+
+.cs-modal__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.cs-modal__title {
+    margin: 0;
+    font-size: 28px;
+    letter-spacing: .3px;
+}
+
+.cs-modal__count {
+    opacity: .65;
+    font-weight: 600;
+    margin-left: 8px;
+}
+
+.pid-toolbar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.pid-search {
+    flex: 1 1 auto;
+    height: 38px;
+    border-radius: 12px;
+    background: #0b0e13;
+    border: 1px solid var(--card-border, #1f2530);
+    color: #dbe2f2;
+    padding: 0 12px;
+    outline: none;
+}
+
+    .pid-search::placeholder {
+        color: #7e8aa7;
+    }
+
+.pid-scroll {
+    overflow: auto;
+    max-height: 60vh;
+    padding-right: 6px;
+}
+
+/* responsive grid of PID chips */
+.pid-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+
+.pid-chip {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: #0b0e13;
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: 14px;
+    padding: 12px 12px 10px;
+    transition: border-color .18s, transform .08s;
+}
+
+    .pid-chip:hover {
+        border-color: rgba(255,255,255,.14);
+        transform: translateY(-1px);
+    }
+
+.pid-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-weight: 700;
+    letter-spacing: .8px;
+    font-size: 13px;
+    color: #e9eefc;
+    opacity: .9;
+}
+
+.pid-name {
+    line-height: 1.15;
+    font-weight: 600;
+    color: #cbd6f6;
+    max-width: 46ch;
+    word-wrap: break-word;
+}
+
+/* tag for unknown names */
+.pid-unknown .pid-name {
+    color: #8b95b3;
+    opacity: .75;
+}
+
+/* footer row */
+.cs-modal__foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 12px;
+}
