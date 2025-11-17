@@ -1,0 +1,18 @@
+﻿.dtc-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 10px;
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    margin: 6px 0
+}
+
+.dtc-code {
+    font-weight: 700;
+    letter-spacing: .4px
+}
+
+.dtc-desc {
+    opacity: .92
+}

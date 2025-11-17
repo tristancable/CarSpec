@@ -21,6 +21,11 @@
         grid-column: 1 / -1;
     }
 
+    .cs-card.info {
+        background: var(--info-card);
+        border: 1px solid var(--info-card-border);
+    }
+
     .cs-card h3 {
         font-family: var(--cs-font);
         letter-spacing: 1px;
@@ -29,4 +34,39 @@
         font-size: var(--title-size);
         margin-bottom: 12px;
         color: var(--muted);
+    }
+
+.cs-card__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 0 0 8px 0;
+}
+
+    .cs-card__header h3 {
+        margin: 0;
+    }
+
+.cs-log__pre {
+    background: #0c0f14;
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 12px;
+    max-height: 220px;
+    overflow: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: #7CFF6B;
+}
+
+.cs-banner {
+    background: var(--bg);
+    border: 1px dashed var(--card-border);
+    padding: 12px 14px;
+    border-radius: 14px;
+}
+
+    .cs-banner .icon {
+        font-size: 20px;
+        line-height: 1;
+        margin-right: 10px;
     }

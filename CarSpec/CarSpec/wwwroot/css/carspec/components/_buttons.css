@@ -43,3 +43,19 @@ button.cs-btn {
     outline: none;
     box-shadow: 0 0 0 2px var(--ring);
 }
+
+.cs-btn--sm {
+    font-size: 12px;
+    line-height: 1;
+    padding: 4px 10px;
+    border-radius: 10px;
+    min-height: 0;
+}
+
+.cs-btn--xs {
+    font-size: 11px;
+    line-height: 1;
+    padding: 2px 8px;
+    border-radius: 8px;
+    min-height: 0;
+}

@@ -1,0 +1,85 @@
+﻿/* header row still a flex row */
+.header-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-top: 18px; /* creates space under the floating controls */
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+/* keep it in the top-right */
+.container {
+    position: relative;
+}
+
+.recplay-float {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 1;
+}
+
+/* compact visual language */
+.rec-toolbar.compact {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* tiny icon buttons */
+.cs-iconbtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    background: var(--btn-bg, #1c232e);
+    color: var(--text, #dfe7ff);
+    border: 1px solid var(--card-border);
+    box-shadow: var(--btn-shadow, 0 1px 0 rgba(0,0,0,.3) inset);
+    cursor: pointer;
+    line-height: 1;
+    font-size: 16px;
+}
+
+    .cs-iconbtn:disabled {
+        opacity: .5;
+        cursor: not-allowed;
+    }
+
+/* shrink inputs/badge padding */
+.cs-input--sm {
+    height: 32px;
+    padding: 2px 8px;
+    font-size: .9rem;
+}
+
+.compact-chip {
+    padding: 4px 6px;
+    gap: 6px;
+}
+
+.speed-dd {
+    width: 72px;
+    min-width: 72px;
+}
+
+/* adjust layout on narrow screens */
+@media (max-width:1050px) {
+    .recplay-float {
+        position: static;
+        margin-top: 8px;
+    }
+
+    .header-bar {
+        margin-top: 12px;
+    }
+}

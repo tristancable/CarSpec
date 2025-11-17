@@ -1,0 +1,162 @@
+﻿@page "/codes"
+@using CarSpec.Models
+@using CarSpec.Utils
+@inject CarSpec.Services.Obd.ObdConnectionService Obd
+@inject NavigationManager Nav
+
+<div class="container">
+  <h1 class="cs-title" style="font-size:26px;margin:6px 0 12px">Engine Codes</h1>
+
+  @if (!Obd.IsAdapterConnected)
+  {
+    <div class="cs-card info" style="margin-bottom:12px">
+      Not connected. Go to <a href="/dashboard">Dashboard</a> and connect to the adapter first.
+    </div>
+  }
+  else 
+  {
+    <div class="cs-controls" style="justify-content:space-between;margin-bottom:12px">
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="cs-btn btn-secondary" @onclick="ReadCodes" disabled="@(!_canRead)">
+          @(_loading ? "Reading…" : "Read Codes")
+        </button>
+
+        <button class="cs-btn" style="background:linear-gradient(180deg,#ffe3e3,#ffc5c5);border:1px solid #ff9c9c;color:#5b1111"
+                @onclick="ConfirmClear" disabled="@(!_canRead)">
+          Clear Check Engine Light
+        </button>
+      </div>
+      @* <button class="cs-btn btn-secondary" @onclick="@(()=> Nav.NavigateTo("/dashboard"))">⬅ Back</button> *@
+    </div>
+  }
+
+  <section class="cs-card full" style="margin-bottom:12px">
+    <h3>Status</h3>
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px">
+      <div class="cs-card">
+        <h3>MIL</h3>
+        <div style="font-size:22px">@(_snap?.MilOn == true ? "ON" : "OFF")</div>
+      </div>
+      <div class="cs-card">
+        <h3>Stored Count</h3>
+        <div style="font-size:22px">@(_snap?.NumStored ?? 0)</div>
+      </div>
+      <div class="cs-card">
+        <h3>Adapter</h3>
+        <div>@(Obd.IsAdapterConnected ? "Connected" : "Disconnected")</div>
+      </div>
+      <div class="cs-card">
+        <h3>ECU</h3>
+        <div>@(Obd.IsEcuConnected ? "Online" : "Offline")</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="cs-grid">
+    <section class="cs-card wide">
+      <h3>Stored Codes</h3>
+      @RenderCodeList(_snap?.Stored)
+    </section>
+    <section class="cs-card wide">
+      <h3>Pending Codes</h3>
+      @RenderCodeList(_snap?.Pending)
+    </section>
+    <section class="cs-card wide">
+      <h3>Permanent Codes</h3>
+      @RenderCodeList(_snap?.Permanent)
+    </section>
+  </div>
+
+  @if (_showConfirm)
+  {
+    <div class="cs-modal">
+      <div class="cs-modal__card">
+        <h3>Clear DTCs?</h3>
+        <p>This will clear stored trouble codes and reset readiness monitors. Only do this when safe and legal.</p>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="cs-btn btn-secondary" @onclick="()=> _showConfirm=false">Cancel</button>
+          <button class="cs-btn primary" @onclick="ClearNow">Yes, clear</button>
+        </div>
+      </div>
+    </div>
+  }
+</div>
+
+@code {
+  private DtcSnapshot? _snap;
+  private bool _loading;
+  private bool _showConfirm;
+
+  // Can read only when live ECU is online (and not sim)
+  private bool _canRead => Obd.IsAdapterConnected && Obd.IsEcuConnected && !Obd.SimulationMode && !_loading;
+
+  protected override Task OnInitializedAsync()
+  {
+    // No auto-read; user clicks "Read Codes".
+    return Task.CompletedTask;
+  }
+
+  private async Task ReadCodes()
+  {
+    if (!_canRead) return;
+    _loading = true;
+    try { _snap = await Obd.ReadTroubleCodesAsync(); }
+    catch { /* optionally surface a toast */ }
+    finally { _loading = false; StateHasChanged(); }
+  }
+
+  private void ConfirmClear() => _showConfirm = true;
+
+  private async Task ClearNow()
+  {
+    _showConfirm = false;
+    if (await Obd.ClearTroubleCodesAsync())
+      await ReadCodes(); // refresh after clear
+  }
+
+  private RenderFragment RenderCodeList(List<string>? codes) => builder =>
+    {
+        if (codes is { Count: > 0 })
+        {
+            // unique + stable order
+            var items = codes
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s.Trim().ToUpperInvariant())
+                .Distinct()
+                .OrderBy(s => s)
+                .ToList();
+
+            builder.OpenElement(0, "ul");
+            foreach (var c in items)
+            {
+                var name = DtcCatalog.GetName(c); // <- description lookup
+
+                builder.OpenElement(1, "li");
+                // style is optional—kept simple so it fits your theme
+                builder.AddAttribute(2, "class", "dtc-row");
+
+                builder.OpenElement(3, "span");
+                builder.AddAttribute(4, "class", "dtc-code");
+                builder.AddContent(5, c);
+                builder.CloseElement();
+
+                builder.AddContent(6, " — ");
+
+                builder.OpenElement(7, "span");
+                builder.AddAttribute(8, "class", "dtc-desc");
+                builder.AddContent(9, string.IsNullOrWhiteSpace(name) ? "Unknown DTC" : name);
+                builder.CloseElement();
+
+                builder.CloseElement(); // li
+            }
+            builder.CloseElement(); // ul
+        }
+        else
+        {
+            builder.OpenElement(0, "div");
+            builder.AddAttribute(1, "style", "opacity:.7");
+            builder.AddContent(2, "— none —");
+            builder.CloseElement();
+        }
+    };
+}

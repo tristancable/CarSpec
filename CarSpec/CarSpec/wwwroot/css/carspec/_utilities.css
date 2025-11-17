@@ -73,3 +73,20 @@ a.cs-badge, a.cs-badge * {
 .is-hidden {
     display: none !important;
 }
+
+.hint {
+    font-size: .85em;
+    font-weight: 500;
+}
+
+.hint--required {
+    color: #e33;
+}
+
+.hint--optional {
+    color: #6B7280;
+}
+
+.unit {
+    color: #94A3B8;
+}

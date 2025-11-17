@@ -24,5 +24,7 @@ namespace CarSpec.Interfaces
 
         // Called after a successful ECU fingerprint to persist learned info
         Task LearnFromFingerprintAsync(EcuFingerprint fp, string transport = "BLE");
+
+        Task UpsertAsync(VehicleProfile profile);
     }
 }

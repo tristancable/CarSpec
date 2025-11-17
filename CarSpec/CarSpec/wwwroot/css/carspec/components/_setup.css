@@ -82,6 +82,17 @@
     color: #cfe2ff;
 }
 
+.setup-banner {
+    background: linear-gradient(180deg, var(--setup-input-bg-1), var(--setup-input-bg-2));
+    border: 1px solid var(--setup-border);
+    border-radius: 12px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
 /* ——— GRID ——— */
 .form-grid {
     display: grid;
@@ -136,7 +147,7 @@
     border: 1px solid var(--setup-border);
     background: linear-gradient(180deg, var(--setup-input-bg-1), var(--setup-input-bg-2));
     caret-color: var(--setup-caret);
-    color: #e9eef7;
+    color: var(--text);
     outline: none;
     box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
     transition: border-color .18s ease, box-shadow .18s ease, background .18s ease, transform .08s ease;
@@ -157,6 +168,12 @@
         box-shadow: 0 0 0 3px rgba(255,120,0,.18), 0 10px 26px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06);
         background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
         transform: translateY(-1px);
+    }
+
+    .cs-input option,
+    .cs-input optgroup {
+        background: var(--bg); /* menu background */
+        color: var(--text); /* menu text */
     }
 
 /* Selects should feel identical to inputs */
