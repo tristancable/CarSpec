@@ -69,6 +69,29 @@ const _resize = new Map();        // id -> ResizeObserver
 const _valueOverlays = new Map(); // id -> { el, suffix }
 const _els = new Map();           // id -> canvas element
 
+// global resize/orientation handling
+let _globalResizeHooked = false;
+let _globalResizeTimer = 0;
+
+function _hookGlobalResize() {
+    if (_globalResizeHooked || typeof window === 'undefined') return;
+    _globalResizeHooked = true;
+
+    const handler = () => {
+        clearTimeout(_globalResizeTimer);
+        _globalResizeTimer = setTimeout(() => {
+            // refit every gauge to its host (uses _fitOne below)
+            for (const [id, g] of _gauges) {
+                _fitOne(id, g);
+            }
+        }, 120); // debounce a bit
+    };
+
+    window.addEventListener('resize', handler);
+    window.addEventListener('orientationchange', handler);
+}
+
+
 function _ensureOverlay(host, text) {
     let sub = host.querySelector('.gauge-subunits');
     if (!sub) {
@@ -227,6 +250,9 @@ export async function initGauge(canvasId, config = {}) {
 
     if (!config.noResize) _observeResize(el, gauge);
     _gauges.set(canvasId, gauge);
+
+    // ensure global resize/orientation listener is attached once
+    _hookGlobalResize();
 }
 
 export function setValue(canvasId, value) {

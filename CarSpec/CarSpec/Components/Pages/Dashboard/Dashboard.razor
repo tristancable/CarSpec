@@ -5,7 +5,7 @@
 @using CarSpec.Services.Telemetry
 
 <div class="container">
-    <h1 class="cs-title" style="font-size:26px;margin:2px 0 6px">CarSpec Dashboard</h1>
+    <h1 class="cs-title" style="font-size:26px;margin:2px 0 6px">Dashboard</h1>
 
     <RecReplayToolbar IsRecording="@_isRecording"
                       IsReplaying="@_isReplaying"
@@ -129,7 +129,7 @@
     {
         @if (ShouldRenderGauges)
         {
-            <div class="cs-grid @( _view == DisplayMode.Gauges ? "" : "is-hidden")" style="margin-bottom:18px">
+            <div class="cs-grid cs-grid--gauges @( _view == DisplayMode.Gauges ? "" : "is-hidden")" style="margin-bottom:18px">
                 @if (CanShow(PID_RPM))
                 {
                     <section class="cs-card">
@@ -216,7 +216,7 @@
                 }
             </div>
 
-            <div class="cs-grid @( _view == DisplayMode.Numbers ? "" : "is-hidden")" style="margin-bottom:18px">
+            <div class="cs-grid cs-grid--metrics @( _view == DisplayMode.Numbers ? "" : "is-hidden")" style="margin-bottom:18px">
                 @if (CanShow(PID_RPM))
                 {
                     <section class="cs-card cs-metric">
