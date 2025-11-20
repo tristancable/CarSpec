@@ -76,6 +76,14 @@ namespace CarSpec.Services.Obd
             lock (_logLock) return _logQ.ToList();
         }
 
+        public void ClearLog()
+        {
+            lock (_logLock)
+            {
+                _logQ.Clear();
+            }
+        }
+
         public ObdConnectionService(IVehicleProfileService profiles,
                             Telemetry.RecordingService rec,
                             Telemetry.ReplayService replay)
@@ -1019,7 +1027,7 @@ namespace CarSpec.Services.Obd
             // Common patterns
             if (device == null)
             {
-                var patterns = new (string a, string b)[] { ("VEEPEAK", "OBD"), ("OBDII", "ELM"), ("V-LINK", "OBD") };
+                var patterns = new (string a, string b)[] { ("VEEPEAK", "OBD"), ("OBDII", "ELM"), ("V-LINK", "OBD"), ("FIXD", "OBD") };
                 foreach (var (a, b) in patterns)
                 {
                     device = await _bluetooth.FindDeviceAsync(a, b);

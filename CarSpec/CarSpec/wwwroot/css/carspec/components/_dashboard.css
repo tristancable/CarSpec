@@ -4,7 +4,7 @@
     align-items: center;
     gap: 16px;
     flex-wrap: wrap;
-    margin-top: 18px; /* creates space under the floating controls */
+    margin-top: 18px; /* space under floating controls */
 }
 
 .header-left {
@@ -14,7 +14,7 @@
     flex-wrap: wrap;
 }
 
-/* keep it in the top-right */
+/* keep it in the top-right on desktop */
 .container {
     position: relative;
 }
@@ -24,13 +24,6 @@
     top: 0;
     right: 0;
     z-index: 1;
-}
-
-/* compact visual language */
-.rec-toolbar.compact {
-    display: flex;
-    align-items: center;
-    gap: 8px;
 }
 
 /* tiny icon buttons */
@@ -55,6 +48,12 @@
         cursor: not-allowed;
     }
 
+.cs-debug-btn {
+    margin-top: 6px;
+    margin-bottom: 10px;
+    align-self: flex-start;
+}
+
 /* shrink inputs/badge padding */
 .cs-input--sm {
     height: 32px;
@@ -72,14 +71,88 @@
     min-width: 72px;
 }
 
-/* adjust layout on narrow screens */
-@media (max-width:1050px) {
+/* --- Rec / Replay toolbar layout --- */
+
+.rec-toolbar {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+}
+
+.rec-top-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.rec-bottom-row {
+    display: flex;
+    justify-content: center; /* center under select/speed row */
+    width: 100%;
+    margin-top: 4px;
+}
+
+.rec-transport {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.rec-transport-btn {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    font-size: 14px;
+    padding: 0;
+}
+
+/* ---------- Responsive tweaks ---------- */
+
+/* tablet and down */
+@media (max-width: 1050px) {
     .recplay-float {
-        position: static;
+        position: static; /* no absolute positioning */
         margin-top: 8px;
+        display: flex;
+        justify-content: center; /* center whole toolbar */
     }
 
     .header-bar {
         margin-top: 12px;
+    }
+
+    .rec-toolbar {
+        align-items: center;
+    }
+}
+
+/* phone-ish width */
+@media (max-width: 720px) {
+    /* slightly smaller title */
+    .cs-title {
+        font-size: 20px !important;
+        margin-bottom: 8px;
+    }
+
+    .header-bar {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .header-left {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .rec-top-row {
+        width: 100%;
+        justify-content: center;
+    }
+
+    /* if your gauges grid uses .cs-grid, this makes it 1 column on phones */
+    .cs-grid {
+        grid-template-columns: minmax(0, 1fr);
     }
 }

@@ -26,7 +26,7 @@ namespace CarSpec
             builder.Services.AddSingleton<IVehicleProfileService, VehicleProfileService>();
             builder.Services.AddSingleton<RecordingService>();
             builder.Services.AddSingleton<ReplayService>();
-            builder.Services.AddScoped<IAppStorage, PreferencesStorage>();
+            builder.Services.AddSingleton<IAppStorage, FileStorage>();
             builder.Services.AddSyncfusionBlazor();
 
 

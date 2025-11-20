@@ -1,0 +1,195 @@
+﻿@using CarSpec.Models
+@using CarSpec.Services.Telemetry
+
+<div class="recplay-float">
+    <div class="rec-toolbar">
+        @* ── TOP ROW: selection + speed ── *@
+        <div class="rec-top-row cs-badge cs-badge--panel compact-chip">
+            <select class="cs-input cs-input--sm"
+                    style="min-width:160px"
+                    value="@SelectedReplayId"
+                    @onchange="HandleReplayChanged"
+                    aria-label="Replay selection">
+                <option value="">(none)</option>
+                @foreach (var r in Replays)
+                {
+                    <option value="@r.Id">
+                        @($"{(r.Vehicle ?? "Unknown")} — {FormatMs(r.DurationMs)} — {r.CreatedUtc.ToLocalTime():g}")
+                    </option>
+                }
+            </select>
+
+            <select class="cs-input cs-input--sm speed-dd"
+                    @onchange="HandleReplaySpeedChanged"
+                    aria-label="Replay speed">
+                <option value="0.5" selected="@IsCurrentSpeed(0.5)">0.5×</option>
+                <option value="1" selected="@IsCurrentSpeed(1)">1×</option>
+                <option value="1.5" selected="@IsCurrentSpeed(1.5)">1.5×</option>
+                <option value="2" selected="@IsCurrentSpeed(2)">2×</option>
+                <option value="3" selected="@IsCurrentSpeed(3)">3×</option>
+            </select>
+        </div>
+
+        @* ── BOTTOM ROW: RECORD + REW + PLAY/PAUSE + FF + STOP ── *@
+        <div class="rec-bottom-row">
+            <div class="rec-transport">
+                @* RECORD *@
+                @if (!IsReplaying)
+                {
+                    if (!IsRecording)
+                    {
+                        <button class="cs-iconbtn rec-transport-btn"
+                                title="Start recording"
+                                aria-label="Start recording"
+                                @onclick="StartRecording"
+                                disabled="@DisableRecord">
+                            ⏺
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="cs-iconbtn rec-transport-btn"
+                                title="Stop recording"
+                                aria-label="Stop recording"
+                                @onclick="StopRecording">
+                            ⏹
+                        </button>
+                    }
+                }
+
+                @* REWIND (visual only for now) *@
+                <button class="cs-iconbtn rec-transport-btn"
+                        title="Rewind"
+                        aria-label="Rewind"
+                        @onclick="OnRewindClicked"
+                        disabled="@(!IsReplaying)">
+                    ⏮
+                </button>
+
+                @* PLAY / PAUSE combined *@
+                <button class="cs-iconbtn rec-transport-btn"
+                        title="@PlayButtonTitle"
+                        aria-label="@PlayButtonTitle"
+                        @onclick="OnPlayOrPauseClicked"
+                        disabled="@PlayButtonDisabled">
+                    @PlayButtonIcon
+                </button>
+
+                @* FAST FORWARD (visual only for now) *@
+                <button class="cs-iconbtn rec-transport-btn"
+                        title="Fast forward"
+                        aria-label="Fast forward"
+                        @onclick="OnFastForwardClicked"
+                        disabled="@(!IsReplaying)">
+                    ⏭
+                </button>
+
+                @* STOP REPLAY *@
+                <button class="cs-iconbtn rec-transport-btn"
+                        title="Stop replay"
+                        aria-label="Stop replay"
+                        @onclick="StopReplay"
+                        disabled="@(!IsReplaying)">
+                    ⏹
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public bool IsRecording { get; set; }
+    [Parameter] public bool IsReplaying { get; set; }
+    [Parameter] public bool IsPreparingReplay { get; set; }
+    [Parameter] public bool IsReplayPaused { get; set; }
+
+    [Parameter] public string? SelectedReplayId { get; set; }
+    [Parameter] public IReadOnlyList<RecordingMeta> Replays { get; set; } = Array.Empty<RecordingMeta>();
+    [Parameter] public double ReplaySpeed { get; set; } = 1.0;
+
+    [Parameter] public bool DisableRecord { get; set; }
+    [Parameter] public bool DisableReplay { get; set; }
+
+    [Parameter] public EventCallback StartRecording { get; set; }
+    [Parameter] public EventCallback StopRecording { get; set; }
+
+    [Parameter] public EventCallback StartReplay { get; set; }
+    [Parameter] public EventCallback StopReplay { get; set; }
+
+    [Parameter] public EventCallback PauseReplay { get; set; }
+    [Parameter] public EventCallback ResumeReplay { get; set; }
+
+    [Parameter] public EventCallback<string> ReplaySelectionChanged { get; set; }
+    [Parameter] public EventCallback<double> ReplaySpeedChanged { get; set; }
+
+    private string _localSelectedId = "";
+
+    protected override void OnParametersSet()
+    {
+        if (!string.IsNullOrWhiteSpace(SelectedReplayId) &&
+            !string.Equals(SelectedReplayId, _localSelectedId, StringComparison.Ordinal))
+        {
+            _localSelectedId = SelectedReplayId!;
+        }
+    }
+
+    private Task HandleReplayChanged(ChangeEventArgs e)
+    {
+        _localSelectedId = e.Value?.ToString() ?? "";
+        return ReplaySelectionChanged.InvokeAsync(_localSelectedId);
+    }
+
+    private Task HandleReplaySpeedChanged(ChangeEventArgs e)
+    {
+        if (double.TryParse(
+                e.Value?.ToString(),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var val))
+        {
+            return ReplaySpeedChanged.InvokeAsync(val);
+        }
+        return Task.CompletedTask;
+    }
+
+    private bool IsCurrentSpeed(double value)
+        => Math.Abs(ReplaySpeed - value) < 0.001;
+
+    private static string FormatMs(long? ms)
+    {
+        if (ms is null || ms <= 0) return "00:00";
+        var ts = TimeSpan.FromMilliseconds(ms.Value);
+        return $"{(int)ts.TotalMinutes:00}:{ts.Seconds:00}";
+    }
+
+    // --- Transport helpers ---
+
+    private bool PlayButtonDisabled =>
+        !IsReplaying && (DisableReplay || string.IsNullOrWhiteSpace(SelectedReplayId) || IsPreparingReplay);
+
+    private string PlayButtonTitle =>
+        IsReplaying
+            ? (IsReplayPaused ? "Resume replay" : "Pause replay")
+            : "Play replay";
+
+    private string PlayButtonIcon =>
+        IsReplaying
+            ? (IsReplayPaused ? "▶" : "⏸")
+            : "▶";
+
+    private Task OnPlayOrPauseClicked()
+    {
+        if (IsReplaying)
+            return TogglePauseReplay();
+        else
+            return StartReplay.InvokeAsync();
+    }
+
+    private Task TogglePauseReplay()
+        => IsReplayPaused ? ResumeReplay.InvokeAsync()
+                          : PauseReplay.InvokeAsync();
+
+    // Rewind / FF are placeholders for now (buttons are disabled unless IsReplaying)
+    private Task OnRewindClicked() => Task.CompletedTask;
+    private Task OnFastForwardClicked() => Task.CompletedTask;
+}

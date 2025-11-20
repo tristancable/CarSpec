@@ -132,6 +132,28 @@ namespace CarSpec.Services.Telemetry
             return done;
         }
 
+        public async Task<string?> DumpRecordingAsync(string id)
+        {
+            // Get the stored payload for this recording
+            var blob = await _storage.GetAsync<byte[]>(DataKey(id));
+            if (blob is null || blob.Length == 0)
+                return null;
+
+            try
+            {
+                // Try to treat it as GZIP
+                using var src = new MemoryStream(blob);
+                using var gz = new GZipStream(src, CompressionMode.Decompress);
+                using var reader = new StreamReader(gz, Encoding.UTF8);
+                return await reader.ReadToEndAsync(); // header + frames (one JSON per line)
+            }
+            catch
+            {
+                // If it's not gzipped (e.g. gzip=false), just interpret as UTF-8 text
+                return Encoding.UTF8.GetString(blob);
+            }
+        }
+
         public async Task<List<RecordingMeta>> ListAsync()
             => await _storage.GetAsync<List<RecordingMeta>>(IndexKey) ?? new List<RecordingMeta>();
 

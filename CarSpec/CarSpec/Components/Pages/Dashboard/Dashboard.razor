@@ -1,0 +1,414 @@
+﻿@page "/"
+@page "/dashboard"
+@using CarSpec.Models
+@using CarSpec.Utils
+@using CarSpec.Services.Telemetry
+
+<div class="container">
+    <h1 class="cs-title" style="font-size:26px;margin:2px 0 6px">CarSpec Dashboard</h1>
+
+    <RecReplayToolbar IsRecording="@_isRecording"
+                      IsReplaying="@_isReplaying"
+                      IsPreparingReplay="@_isPreparingReplay"
+                      IsReplayPaused="@_isReplayPaused"
+                      SelectedReplayId="@_selectedReplayId"
+                      Replays="@_replays"
+                      ReplaySpeed="@_replaySpeed"
+                      DisableRecord="@(!ObdService.IsEcuConnected || ObdService.SimulationMode)"
+                      DisableReplay="@(!ObdService.SimulationMode && ObdService.IsEcuConnected)"
+                      StartRecording="StartRecording"
+                      StopRecording="StopRecording"
+                      StartReplay="StartReplay"
+                      StopReplay="StopReplay"
+                      PauseReplay="PauseReplay"
+                      ResumeReplay="ResumeReplay"
+                      ReplaySelectionChanged="OnReplaySelectionChanged"
+                      ReplaySpeedChanged="OnReplaySpeedChanged" />
+
+    <button class="cs-btn btn-secondary cs-btn--sm cs-debug-btn"
+            type="button"
+            @onclick="DebugDumpSelectedRecordingAsync">
+        Debug Dump Recording
+    </button>
+
+    @if (_needsSetup || Profiles?.Current == null)
+    {
+        <div class="cs-card warn" style="margin-bottom:12px; display:flex; align-items:center; justify-content:space-between;">
+            <div>
+                <strong>Vehicle setup required</strong>
+                <div style="opacity:.85">Pick your car so we can save learned protocol/PIDs to its profile.</div>
+            </div>
+            <div>
+                <button class="cs-btn primary" type="button" @onclick="RunSetup">
+                    ⚙️ Run Setup
+                </button>
+            </div>
+        </div>
+    }
+
+    <div class="cs-controls header-bar">
+      <div class="header-left">
+        <div class="cs-badge cs-badge--panel">
+          <span class="label">Mode:</span>
+          <span class="cs-pill @(GetModeClass())">@GetModeText()</span>
+        </div>
+
+        @* Connect / Disconnect buttons *@
+        @if (!ObdService.IsAdapterConnected)
+        {
+            @if (!ObdService.IsConnecting)
+            {
+                <button class="cs-btn primary" @onclick="SwitchToLive" disabled="@_needsSetup">
+                    🔌 Connect to OBD
+                </button>
+            }
+            else
+            {
+                <button class="cs-btn btn-secondary" @onclick="CancelConnecting" disabled="@_needsSetup">
+                    ⛔ Stop Connecting
+                </button>
+            }
+        }
+        else if (ObdService.IsAdapterConnected && !ObdService.IsEcuConnected)
+        {
+            <button class="cs-btn btn-secondary" @onclick="ReconnectEcu" disabled="@_needsSetup">🔁 Reconnect ECU</button>
+            <button class="cs-btn btn-secondary" @onclick="Disconnect" disabled="@_needsSetup">🔌 Disconnect OBD</button>
+        }
+        else if (ObdService.IsEcuConnected)
+        {
+            <button class="cs-btn btn-secondary" @onclick="Disconnect" disabled="@_needsSetup">🔌 Disconnect OBD</button>
+        }
+
+        <div class="cs-seg-icons" role="tablist" aria-label="Display mode">
+            <button class="seg @( _view == DisplayMode.Gauges ? "active" : null )"
+                    @onclick="() => SwitchView(DisplayMode.Gauges)"
+                    title="Gauges" aria-pressed="@(_view == DisplayMode.Gauges)">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 3a9 9 0 0 0-9 9h2a7 7 0 1 1 14 0h2a9 9 0 0 0-9-9z"
+                          fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                    <path d="M12 13l4.2-4.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                    <circle cx="12" cy="13" r="1.6" fill="currentColor" />
+                </svg>
+            </button>
+
+            <button class="seg @( _view == DisplayMode.Numbers ? "active" : null )"
+                    @onclick="() => SwitchView(DisplayMode.Numbers)"
+                    title="Numbers" aria-pressed="@(_view == DisplayMode.Numbers)">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 8h16M4 16h16M8 4v16M16 4v16"
+                          fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                </svg>
+            </button>
+        </div>
+    </div>
+    </div>
+
+    @if (ObdService.IsEcuConnected)
+    {
+            var fp = ObdService.LastFingerprint;
+            var protoDisplay = string.IsNullOrWhiteSpace(fp?.Protocol)
+                ? (Profiles?.Current?.ProtocolDetected ?? "—")
+                : (fp!.Protocol);
+            var vinDisplay = string.IsNullOrWhiteSpace(fp?.Vin) ? $"—  (Profile Id: {Profiles?.Current?.Id ?? "—"})" : fp!.Vin;
+            var pidCount = fp?.SupportedPids?.Count
+                ?? (Profiles?.Current?.SupportedPidsCache?.Count ?? (int?)null);
+        <section class="cs-card" style="margin:12px 0">
+            <h3>ECU ID</h3>
+            <div>VIN: <strong>@vinDisplay</strong></div>
+            <div>Protocol: <strong>@(string.IsNullOrWhiteSpace(protoDisplay) ? "—" : protoDisplay)</strong></div>
+            <div>Year (from VIN): <strong>@(fp?.Year?.ToString() ?? (Profiles?.Current?.YearDetected?.ToString() ?? "—"))</strong></div>
+            <div>Supported PIDs: <strong>@(pidCount?.ToString() ?? "—")</strong></div>
+        </section>
+    }
+
+    @if (carData is null)
+    {
+        <p>Waiting for data...</p>
+    }
+    else
+    {
+        @if (ShouldRenderGauges)
+        {
+            <div class="cs-grid @( _view == DisplayMode.Gauges ? "" : "is-hidden")" style="margin-bottom:18px">
+                @if (CanShow(PID_RPM))
+                {
+                    <section class="cs-card">
+                        <h3>RPM</h3>
+                        <div class="gauge-host"><canvas id="rpmGauge"></canvas></div>
+                    </section>
+                }
+                @if (CanShow(PID_SPEED))
+                {
+                    <section class="cs-card">
+                        <h3>Speed</h3>
+                        <div class="gauge-host"><canvas id="speedGauge"></canvas></div>
+                    </section>
+                }
+                @if (CanShow(PID_TPS))
+                {
+                    <section class="cs-card">
+                        <h3>Throttle</h3>
+                        <div class="gauge-host"><canvas id="throttleGauge"></canvas></div>
+                    </section>
+                }
+                @if (CanShow(PID_FUEL))
+                {
+                    <section class="cs-card">
+                        <h3>Fuel</h3>
+                        <div class="gauge-host"><canvas id="fuelGauge"></canvas></div>
+                    </section>
+                }
+                @if (CanShow(PID_COOLANT))
+                {
+                    <section class="cs-card">
+                        <h3>Coolant</h3>
+                        <div class="gauge-host"><canvas id="coolantGauge"></canvas></div>
+                    </section>
+                }
+                @if (CanShow(PID_OIL))
+                {
+                    <section class="cs-card">
+                        <h3>Oil Temp</h3>
+                        <div class="gauge-host"><canvas id="oilGauge"></canvas></div>
+                    </section>
+                }
+                @if (CanShow(PID_IAT))
+                {
+                    <section class="cs-card">
+                        <h3>Intake Air</h3>
+                        <div class="gauge-host"><canvas id="iatGauge"></canvas></div>
+                    </section>
+                }
+                @if (CanShow(PID_LOAD))
+                {
+                    <section class="cs-card">
+                        <h3>Engine Load</h3>
+                        <div class="gauge-host"><canvas id="loadGauge"></canvas></div>
+                    </section>
+                }
+                @if (CanShow(PID_FPRESS))
+                {
+                    <section class="cs-card">
+                        <h3>Fuel Pressure</h3>
+                        <div class="gauge-host"><canvas id="fpGauge"></canvas></div>
+                    </section>
+                }
+                @if (CanShow(PID_MAP))
+                {
+                    <section class="cs-card">
+                        <h3>MAP</h3>
+                        <div class="gauge-host"><canvas id="mapGauge"></canvas></div>
+                    </section>
+                }
+                @if (CanShow(PID_TADV))
+                {
+                    <section class="cs-card">
+                        <h3>Timing Advance</h3>
+                        <div class="gauge-host"><canvas id="tadvGauge"></canvas></div>
+                    </section>
+                }
+                @if (CanShow(PID_MAF))
+                {
+                    <section class="cs-card">
+                        <h3>MAF</h3>
+                        <div class="gauge-host"><canvas id="mafGauge"></canvas></div>
+                    </section>
+                }
+            </div>
+
+            <div class="cs-grid @( _view == DisplayMode.Numbers ? "" : "is-hidden")" style="margin-bottom:18px">
+                @if (CanShow(PID_RPM))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>RPM</h3>
+                        <div class="metric @RpmClass(carData?.RPM)"><span class="value">@FormatInt(carData?.RPM)</span><span class="unit">rpm</span></div>
+                    </section>
+                }
+                @if (CanShow(PID_SPEED))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Speed</h3>
+                        <div class="metric @SpeedClass(carData?.Speed)"><span class="value">@FormatInt(carData?.Speed)</span><span class="unit">mph</span></div>
+                    </section>
+                }
+                @if (CanShow(PID_TPS))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Throttle</h3>
+                        <div class="metric @ThrottleClass(carData?.ThrottlePercent)"><span class="value">@FormatInt(carData?.ThrottlePercent)</span><span class="unit">%</span></div>
+                    </section>
+                }
+                @if (CanShow(PID_FUEL))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Fuel</h3>
+                        <div class="metric @FuelClass(carData?.FuelLevelPercent)"><span class="value">@FormatInt(carData?.FuelLevelPercent)</span><span class="unit">%</span></div>
+                    </section>
+                }
+                @if (CanShow(PID_COOLANT))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Coolant</h3>
+                        <div class="metric @TempClass(carData?.CoolantTempF)"><span class="value">@FormatInt(carData?.CoolantTempF)</span><span class="unit">°F</span></div>
+                    </section>
+                }
+                @if (CanShow(PID_OIL))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Oil Temp</h3>
+                        <div class="metric @TempClass(carData?.OilTempF)"><span class="value">@FormatInt(carData?.OilTempF)</span><span class="unit">°F</span></div>
+                    </section>
+                }
+                @if (CanShow(PID_IAT))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Intake Air</h3>
+                        <div class="metric @IatClass(carData?.IntakeTempF)"><span class="value">@FormatInt(carData?.IntakeTempF)</span><span class="unit">°F</span></div>
+                    </section>
+                }
+                @if (CanShow(PID_LOAD))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Engine Load</h3>
+                        <div class="metric"><span class="value">@FormatInt(carData?.EngineLoadPercent)</span><span class="unit">%</span></div>
+                    </section>
+                }
+                @if (CanShow(PID_FPRESS))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Fuel Pressure</h3>
+                        <div class="metric"><span class="value">@FormatInt(carData?.FuelPressureKpa)</span><span class="unit">kPa</span></div>
+                    </section>
+                }
+                @if (CanShow(PID_MAP))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>MAP</h3>
+                        <div class="metric"><span class="value">@FormatInt(carData?.MapKpa)</span><span class="unit">kPa</span></div>
+                    </section>
+                }
+                @if (CanShow(PID_TADV))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Timing</h3>
+                        <div class="metric"><span class="value">@FormatInt(carData?.TimingAdvanceDeg)</span><span class="unit">°</span></div>
+                    </section>
+                }
+                @if (CanShow(PID_MAF))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>MAF</h3>
+                        <div class="metric"><span class="value">@FormatInt(carData?.MafGramsPerSec)</span><span class="unit">g/s</span></div>
+                    </section>
+                }
+                @if (CanShow(PID_BARO))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Barometric Pressure</h3>
+                        <div class="metric">
+                            <span class="value">@FormatInt(carData?.BaroKPa)</span><span class="unit">kPa</span>
+                        </div>
+                    </section>
+                }
+
+                @if (CanShow(PID_FRP_REL))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Fuel Rail (relative)</h3>
+                        <div class="metric">
+                            <span class="value">@FormatInt(carData?.FuelRailPressureRelKPa)</span><span class="unit">kPa</span>
+                        </div>
+                    </section>
+                }
+
+                @if (CanShow(PID_FRP_GAUGE))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Fuel Rail (gauge)</h3>
+                        <div class="metric">
+                            <span class="value">@FormatInt(carData?.FuelRailGaugePressureKPa)</span><span class="unit">kPa</span>
+                        </div>
+                    </section>
+                }
+
+                @if (CanShow(PID_EGR_CMD))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Commanded EGR</h3>
+                        <div class="metric">
+                            <span class="value">@FormatInt(carData?.CommandedEgrPercent)</span><span class="unit">%</span>
+                        </div>
+                    </section>
+                }
+
+                @if (CanShow(PID_EGR_ERR))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>EGR Error</h3>
+                        <div class="metric">
+                            <span class="value">@FormatInt(carData?.EgrErrorPercent)</span><span class="unit">%</span>
+                        </div>
+                    </section>
+                }
+
+                @if (CanShow(PID_EVAP_CMD))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Cmd EVAP Purge</h3>
+                        <div class="metric">
+                            <span class="value">@FormatInt(carData?.CommandedEvapPurgePercent)</span><span class="unit">%</span>
+                        </div>
+                    </section>
+                }
+
+                @if (CanShow(PID_EVAP_P))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>EVAP Vapor Pressure</h3>
+                        <div class="metric">
+                            <span class="value">@FormatInt(carData?.EvapVaporPressurePa)</span><span class="unit">Pa</span>
+                        </div>
+                    </section>
+                }
+
+                @if (CanShow(PID_WARMUPS))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Warm-ups (since clear)</h3>
+                        <div class="metric">
+                            <span class="value">@FormatInt(carData?.WarmUpsSinceClear)</span>
+                        </div>
+                    </section>
+                }
+
+                @if (CanShow(PID_DIST_MIL))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Distance w/ MIL</h3>
+                        <div class="metric">
+                            <span class="value">@FormatInt(carData?.DistanceWithMilKm)</span><span class="unit">km</span>
+                        </div>
+                    </section>
+                }
+
+                @if (CanShow(PID_DIST_CLR))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Distance since clear</h3>
+                        <div class="metric">
+                            <span class="value">@FormatInt(carData?.DistanceSinceClearKm)</span><span class="unit">km</span>
+                        </div>
+                    </section>
+                }
+            </div>
+        }
+        else if (IsLive && !_planKnown)
+        {
+            <div class="cs-card info" style="margin-bottom:12px">
+                Detecting supported sensors for this vehicle…
+            </div>
+        }
+
+        <LogPanel LogLines="outputLog" OnClear="ClearLog" />
+    }
+</div>

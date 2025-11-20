@@ -1,0 +1,22 @@
+﻿<section class="cs-card full">
+    <div class="cs-card__header">
+        <h3>Log</h3>
+        <button class="cs-btn btn-secondary cs-btn--sm"
+                type="button"
+                @onclick="OnClear"
+                disabled="@IsClearDisabled">
+            Clear Log
+        </button>
+    </div>
+
+    <pre class="cs-log__pre">
+@string.Join("\n", LogLines?.TakeLast(120) ?? Enumerable.Empty<string>())
+    </pre>
+</section>
+
+@code {
+    [Parameter] public IReadOnlyList<string>? LogLines { get; set; }
+    [Parameter] public EventCallback OnClear { get; set; }
+
+    private bool IsClearDisabled => (LogLines?.Count ?? 0) == 0;
+}
