@@ -1,10 +1,12 @@
 ﻿.cs-grid {
     display: grid;
-    grid-template-columns: repeat(12,1fr);
+    /* 12-column grid; 3 cards per row when each card spans 4 */
+    grid-template-columns: repeat(12, minmax(0, 1fr));
     gap: var(--gauge-gap);
 }
 
 .cs-card {
+    /* 3 cards per row by default */
     grid-column: span 4;
     border-radius: var(--cs-radius-lg);
     background: var(--card);

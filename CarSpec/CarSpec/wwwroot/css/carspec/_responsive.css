@@ -1,27 +1,21 @@
-﻿@media (min-width:1200px) {
+﻿/* ---------- GRID RESPONSIVE BEHAVIOR ---------- */
+@media (max-width: 899.98px) {
     .cs-grid {
-        grid-template-columns: repeat(3,1fr);
-    }
-}
-/* Force 3 columns on desktop; drop to 1 on mobile */
-@media (min-width:900px) {
-    .cs-grid {
-        grid-template-columns: repeat(3, minmax(300px,1fr));
-        gap: var(--gauge-gap);
+        grid-template-columns: repeat(12, minmax(0, 1fr));
     }
 
-    .cs-card {
-        grid-column: auto;
+    .cs-grid--metrics .cs-card,
+    .cs-grid--gauges .cs-card {
+        grid-column: span 4;
     }
-}
 
-@media (max-width:899.98px) {
-    .cs-grid {
-        grid-template-columns: 1fr;
+    .cs-card.full,
+    .cs-card.wide {
+        grid-column: 1 / -1;
     }
 }
 
-@media (max-width:720px) {
+@media (max-width: 720px) {
     .container {
         padding: 16px;
     }
@@ -31,23 +25,53 @@
         margin-bottom: 14px;
     }
 
-        .cs-controls .cs-badge, .cs-controls .cs-btn {
+        .cs-controls .cs-badge,
+        .cs-controls .cs-btn {
             height: 38px;
         }
 
-    .cs-grid {
-        grid-template-columns: 1fr;
+    .cs-grid--metrics .cs-card {
+        padding: 12px;
     }
 
-    .cs-card, .cs-card.wide, .cs-card.full {
-        grid-column: 1 / -1;
+    .cs-metric h3 {
+        font-size: 11px;
+        letter-spacing: 0.5px;
+        white-space: normal;
+    }
+
+    .cs-metric .metric .value {
+        font-size: 22px;
+    }
+
+    .cs-grid--gauges .cs-card {
+        grid-column: span 4;
     }
 
     :root {
-        --gauge-size: 240px;
+        --gauge-size: 210px;
     }
 }
-/* tighten for short screens */
+
+@media (max-width: 600px) {
+    .cs-grid--gauges .cs-card {
+        grid-column: span 6;
+    }
+
+    .cs-grid--metrics .cs-card {
+        grid-column: span 4
+    }
+
+    .cs-metric h3 {
+        font-size: 10px;
+        letter-spacing: 0.3px;
+    }
+
+    :root {
+        --gauge-size: 180px;
+    }
+}
+
 @media (max-height:980px) {
     :root {
         --gauge-size: 240px;
@@ -65,7 +89,7 @@
         --title-size: 12px;
     }
 }
-/* optional density knobs */
+
 html[data-density="compact"] {
     --gauge-size: 240px;
     --gauge-gap: 14px;
@@ -80,7 +104,6 @@ html[data-density="ultra"] {
     --title-size: 12px;
 }
 
-/* two mini bars in one card (keep if you ever use it) */
 .gauge-row {
     display: grid;
     grid-template-columns: repeat(2,minmax(0,1fr));

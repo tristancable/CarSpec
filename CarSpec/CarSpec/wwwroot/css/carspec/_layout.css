@@ -17,3 +17,13 @@
     border-top: 1px solid var(--card-border);
     padding-bottom: calc(12px + env(safe-area-inset-bottom));
 }
+
+@media (max-width: 720px) {
+    .cs-main {
+        padding-bottom: 80px; /* space for bottom nav */
+    }
+
+    .cs-footer {
+        margin-bottom: 60px; /* keeps footer text above the bar a bit */
+    }
+}
