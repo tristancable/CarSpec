@@ -522,12 +522,14 @@ namespace CarSpec.Services.Obd
             if (_isIso9141)
             {
                 await SendCommandAsync("ATST 20", ct: ct);   // ISO needs longer silence timeout
-                _pidTimeoutMs = 1100;
+                //_pidTimeoutMs = 1100;
+                _pidTimeoutMs = 550;
             }
             else
             {
                 await SendCommandAsync("ATST 0A", ct: ct);   // shorter timeout for CAN
-                _pidTimeoutMs = 500;
+                //_pidTimeoutMs = 500;
+                _pidTimeoutMs = 300;
             }
 
             // Optional init script lines (headers/filters etc.)

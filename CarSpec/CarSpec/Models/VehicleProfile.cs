@@ -5,10 +5,14 @@
     {
         public string Id { get; set; } = Guid.NewGuid().ToString("N");
 
+        public string? ProfileName { get; set; }  // user-given nickname for this profile
         public string? Year { get; set; }
         public string? Make { get; set; }
         public string? Model { get; set; }
         public string? Engine { get; set; }
+
+        public int? OdometerMiles { get; set; }
+        public DateTime? OdometerUpdatedUtc { get; set; }
 
         // User hints
         public string? PreferredTransport { get; set; }     // learned after first connect
@@ -37,5 +41,13 @@
         // 🔹 Add these two OPTIONAL CAN header props
         public string? CanHeaderTx { get; set; }
         public string? CanHeaderRxFilter { get; set; }
+
+        public DashboardLayoutMode DashboardMode { get; set; } = DashboardLayoutMode.Basic;
+
+        /// <summary>
+        /// For Custom mode – list of PIDs / gauge IDs the user wants visible.
+        /// e.g. ["010C","010D","0105"]
+        /// </summary>
+        public List<string>? CustomVisiblePids { get; set; } = new();
     }
 }

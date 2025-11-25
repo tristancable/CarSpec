@@ -39,6 +39,12 @@
         <div class="form-grid">
             <!-- Free-entry basics (no catalog) -->
             <div class="form-row">
+                <label>Nickname <span class="hint hint--optional">(optional)</span></label>
+                <InputText class="cs-input" @bind-Value="form.ProfileName" placeholder="e.g., My Rally Car" />
+                <ValidationMessage For="@(() => form.ProfileName)" />
+            </div>
+
+            <div class="form-row">
                 <label>Year <span class="hint hint--required">(required)</span></label>
                 <InputText class="cs-input" @bind-Value="form.Year" placeholder="e.g., 2002" />
                 <ValidationMessage For="@(() => form.Year)" />
@@ -54,6 +60,20 @@
                 <label>Model <span class="hint hint--required">(required)</span></label>
                 <InputText class="cs-input" @bind-Value="form.Model" placeholder="e.g., WRX" />
                 <ValidationMessage For="@(() => form.Model)" />
+            </div>
+
+            <div class="form-row">
+                <label>
+                    Mileage
+                    <span class="unit">mi</span>
+                    <span class="hint hint--optional">(optional)</span>
+                </label>
+
+                <InputNumber class="cs-input"
+                             @bind-Value="form.OdometerMiles"
+                             placeholder="e.g., 145000" />
+
+                <ValidationMessage For="@(() => form.OdometerMiles)" />
             </div>
 
             <!-- BLE adapter name REQUIRED -->
@@ -95,6 +115,8 @@
 
     private sealed class VehicleForm
     {
+        public string? ProfileName { get; set; }
+
         [Required(ErrorMessage = "Year is required")]
         public string? Year { get; set; }
 
@@ -103,6 +125,9 @@
 
         [Required(ErrorMessage = "Model is required")]
         public string? Model { get; set; }
+
+        [Range(0, 2000000, ErrorMessage = "Mileage must be a positive number")]
+        public int? OdometerMiles { get; set; }
 
         [Required(ErrorMessage = "Bluetooth OBD Name is required")]
         [MinLength(2, ErrorMessage = "Adapter name looks too short")]
@@ -128,9 +153,11 @@
 
         if (!IsCreate && cur is not null)
         {
+            form.ProfileName        = cur.ProfileName;
             form.Year               = cur.Year;
             form.Make               = cur.Make;
             form.Model              = cur.Model;
+            form.OdometerMiles      = cur.OdometerMiles;
             form.AdapterNamePrimary = cur.PreferredAdapterName;
             form.RedlineStart       = cur.TachRedlineStart;
             form.RedlineEnd         = cur.TachMaxRpm;
@@ -157,9 +184,12 @@
         {
             var vp = new VehicleProfile {
                 Id = Guid.NewGuid().ToString("N"),
+                ProfileName = form.ProfileName?.Trim(),
                 Year = form.Year!.Trim(),
                 Make = form.Make!.Trim(),
                 Model = form.Model!.Trim(),
+                OdometerMiles     = form.OdometerMiles,
+                OdometerUpdatedUtc = form.OdometerMiles.HasValue ? DateTime.UtcNow : null,
                 PreferredAdapterName = form.AdapterNamePrimary!.Trim(),
                 TachRedlineStart = redlineStart,
                 TachMaxRpm       = redlineEnd,
@@ -177,9 +207,15 @@
         {
             // UPDATE existing profile
             var vp = Profiles.Current!;
+            vp.ProfileName = form.ProfileName?.Trim();
             vp.Year = form.Year!.Trim();
             vp.Make = form.Make!.Trim();
             vp.Model = form.Model!.Trim();
+            vp.OdometerMiles = form.OdometerMiles;
+            if (form.OdometerMiles.HasValue)
+            {
+                vp.OdometerUpdatedUtc = DateTime.UtcNow;
+            }
             vp.PreferredAdapterName = form.AdapterNamePrimary!.Trim();
             vp.TachRedlineStart = redlineStart;
             vp.TachMaxRpm       = redlineEnd;
