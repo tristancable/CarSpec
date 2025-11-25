@@ -18,7 +18,7 @@
     margin-left: auto;
     display: flex;
     align-items: center;
-    gap: 8px;
+/*    gap: 8px;*/
     flex-wrap: wrap;
 }
 
@@ -99,6 +99,14 @@
 
 /* --- Rec / Replay toolbar layout --- */
 
+.toolbar-row {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0 28px;
+}
+
 .rec-toolbar {
     display: flex;
     flex-direction: column;
@@ -116,7 +124,7 @@
     display: flex;
     justify-content: center; /* center under select/speed row */
     width: 100%;
-    margin-top: 4px;
+    margin: 4px;
 }
 
 .rec-transport {

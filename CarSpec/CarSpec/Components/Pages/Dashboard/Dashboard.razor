@@ -7,29 +7,31 @@
 <div class="container">
     <h1 class="cs-title" style="font-size:26px;margin:2px 0 6px">Dashboard</h1>
 
-    <RecReplayToolbar IsRecording="@_isRecording"
-                      IsReplaying="@_isReplaying"
-                      IsPreparingReplay="@_isPreparingReplay"
-                      IsReplayPaused="@_isReplayPaused"
-                      SelectedReplayId="@_selectedReplayId"
-                      Replays="@_replays"
-                      ReplaySpeed="@_replaySpeed"
-                      DisableRecord="@(!ObdService.IsEcuConnected || ObdService.SimulationMode)"
-                      DisableReplay="@(!ObdService.SimulationMode && ObdService.IsEcuConnected)"
-                      StartRecording="StartRecording"
-                      StopRecording="StopRecording"
-                      StartReplay="StartReplay"
-                      StopReplay="StopReplay"
-                      PauseReplay="PauseReplay"
-                      ResumeReplay="ResumeReplay"
-                      ReplaySelectionChanged="OnReplaySelectionChanged"
-                      ReplaySpeedChanged="OnReplaySpeedChanged" />
+    <div class="toolbar-row">
+        <RecReplayToolbar IsRecording="@_isRecording"
+                          IsReplaying="@_isReplaying"
+                          IsPreparingReplay="@_isPreparingReplay"
+                          IsReplayPaused="@_isReplayPaused"
+                          SelectedReplayId="@_selectedReplayId"
+                          Replays="@_replays"
+                          ReplaySpeed="@_replaySpeed"
+                          DisableRecord="@(!ObdService.IsEcuConnected || ObdService.SimulationMode)"
+                          DisableReplay="@(!ObdService.SimulationMode && ObdService.IsEcuConnected)"
+                          StartRecording="StartRecording"
+                          StopRecording="StopRecording"
+                          StartReplay="StartReplay"
+                          StopReplay="StopReplay"
+                          PauseReplay="PauseReplay"
+                          ResumeReplay="ResumeReplay"
+                          ReplaySelectionChanged="OnReplaySelectionChanged"
+                          ReplaySpeedChanged="OnReplaySpeedChanged" />
 
-    @* <button class="cs-btn btn-secondary cs-btn--sm cs-debug-btn"
-            type="button"
-            @onclick="DebugDumpSelectedRecordingAsync">
-        Debug Dump Recording
-    </button> *@
+        @* <button class="cs-btn btn-secondary cs-btn--sm cs-debug-btn"
+                type="button"
+                @onclick="DebugDumpSelectedRecordingAsync">
+            Debug Dump Recording
+        </button> *@
+    </div>
 
     @if (_needsSetup || Profiles?.Current == null)
     {
