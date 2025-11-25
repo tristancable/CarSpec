@@ -687,9 +687,6 @@ namespace CarSpec.Services.Obd
             return new CarData { LastUpdated = DateTime.Now };
         }
 
-            return new CarData { LastUpdated = DateTime.Now };
-        }
-
         private async Task EnsureCapabilitiesAsync()
         {
             await _profiles.LoadAsync();
