@@ -250,8 +250,8 @@ namespace CarSpec.Services.Obd
                 var cur = _profiles.Current;
 
                 var supportedNow = _adapter.GetSupportedPids()?.ToList() ?? new List<string>();
-                var newProtoRaw = _lastFp?.Protocol;                 // e.g., "AUTO, ISO 9141-2"
-                var newProto = NormalizeProtocol(newProtoRaw);       // e.g., "ISO 9141-2"
+                var newProtoRaw = _lastFp?.Protocol;
+                var newProto = NormalizeProtocol(newProtoRaw);
                 var oldProto = NormalizeProtocol(cur?.ProtocolDetected);
                 var oldSupported = cur?.SupportedPidsCache ?? new List<string>();
 
@@ -687,6 +687,9 @@ namespace CarSpec.Services.Obd
             return new CarData { LastUpdated = DateTime.Now };
         }
 
+            return new CarData { LastUpdated = DateTime.Now };
+        }
+
         private async Task EnsureCapabilitiesAsync()
         {
             await _profiles.LoadAsync();
@@ -777,7 +780,6 @@ namespace CarSpec.Services.Obd
             CurrentPollPlan = desired.ToList();
             Log($"📋 Poll plan → fast[{string.Join(",", fast)}], medium[{string.Join(",", medium)}], slow[{string.Join(",", slow)}]");
 
-            // Declare the cadence variables
             TimeSpan fastInterval;
             TimeSpan medInterval;
             TimeSpan slowInterval;
@@ -813,7 +815,6 @@ namespace CarSpec.Services.Obd
 
             CarData? _last = LastSnapshot;
 
-            // PRIME: push an immediate snapshot so UI can render structure right away
             if (LastSnapshot == null)
             {
                 LastSnapshot = new CarData { LastUpdated = DateTime.Now };
@@ -1068,68 +1069,56 @@ namespace CarSpec.Services.Obd
             {
                 var parts = p.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                 if (parts.Length >= 2) return parts[1];
-                return null; // just "AUTO"
+                return null;
             }
 
             return p;
         }
 
-        // Maps a concrete protocol text to an ATSPx command.
-        // We keep it intentionally simple and conservative.
         private static string? MapProtoToAtsp(string? proto)
         {
             if (string.IsNullOrWhiteSpace(proto)) return null;
             var p = proto.ToUpperInvariant();
 
-            // ISO 9141-2
             if (p.Contains("9141")) return "ATSP3";
-
-            // KWP2000 (ISO 14230)
-            if (p.Contains("14230") || p.Contains("KWP")) return "ATSP4"; // (fast init is ATSP5)
-
-            // ISO 15765-4 CAN
-            if (p.Contains("15765") || p.Contains("CAN")) return "ATSP6"; // (11/500 is common default)
+            if (p.Contains("14230") || p.Contains("KWP")) return "ATSP4";
+            if (p.Contains("15765") || p.Contains("CAN")) return "ATSP6";
 
             return null;
         }
 
-        // Sends an ATSPx hint derived from the profile's detected protocol.
-        // Non-fatal: any exception is swallowed and we still fall back to AUTO later.
         private async Task ApplyProfileProtocolHintAsync()
         {
             try
             {
                 await _profiles.LoadAsync();
-                var protoRaw = _profiles.Current?.ProtocolDetected;   // might be "AUTO, ISO 9141-2"
-                var proto = NormalizeProtocol(protoRaw);              // -> "ISO 9141-2" (or null)
+                var protoRaw = _profiles.Current?.ProtocolDetected;
+                var proto = NormalizeProtocol(protoRaw);
                 if (string.IsNullOrWhiteSpace(proto))
                 {
                     Log("🧭 No saved protocol hint; staying AUTO.");
-                    return; // brand-new profile or nothing learned yet
+                    return;
                 }
 
-                var atsp = MapProtoToAtsp(proto);                     // "ATSP3" / "ATSP4" / "ATSP6"
+                var atsp = MapProtoToAtsp(proto);
                 if (string.IsNullOrWhiteSpace(atsp))
                 {
                     Log($"🧭 Protocol hint not mappable: '{proto}'. Staying AUTO.");
                     return;
                 }
 
-                // Send the hint (non-fatal)
                 await _adapter!.SendCommandAsync(atsp);
                 Log($"🧭 Profile protocol hint → {atsp} ({proto})");
 
-                // Optional: read back what ELM thinks now
                 try
                 {
-                    var dp = await _adapter.SendCommandAsync("ATDP"); // Describe Protocol
+                    var dp = await _adapter.SendCommandAsync("ATDP");
                     var active = dp.RawResponse?.Trim();
                     if (!string.IsNullOrWhiteSpace(active))
                         Log($"📡 ELM describe protocol: {active}");
                 }
                 catch { /* ignore */ }
 
-                // Light probe to “lock” the stack; if it fails, revert to AUTO
                 var up = proto.ToUpperInvariant();
                 bool likelyIso = (up.Contains("9141") || up.Contains("14230") || up.Contains("KWP")) && !up.Contains("CAN");
                 int probeTimeout = likelyIso ? 1800 : 600;
@@ -1139,19 +1128,17 @@ namespace CarSpec.Services.Obd
 
                 if (string.IsNullOrWhiteSpace(raw) || raw.Contains("NO DATA") || raw.Contains("?"))
                 {
-                    await _adapter.SendCommandAsync("ATSP0"); // fall back to AUTO
+                    await _adapter.SendCommandAsync("ATSP0");
                     Log("↩️ Hint didn’t take; fell back to AUTO.");
                 }
                 else
                 {
-                    // Pre-tune local cadence early (nice-to-have; real tuning happens later too)
                     _isIso = likelyIso;
                     _pidTimeoutMs = _isIso ? 1500 : 500;
                 }
             }
             catch (Exception ex)
             {
-                // Never fail connect just because the hint failed
                 Log($"(protocol hint skipped: {ex.Message})");
             }
         }
