@@ -2,16 +2,42 @@
 .header-bar {
     display: flex;
     align-items: center;
-    gap: 16px;
-    flex-wrap: wrap;
-    margin-top: 18px; /* space under floating controls */
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap; /* keeps things from smashing together on smaller widths */
 }
 
 .header-left {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
     flex-wrap: wrap;
+}
+
+.header-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* Make the Basic / Enthusiast / Custom pills a bit tighter so text doesn’t overlap */
+.cs-seg--layout .seg {
+    font-size: 12px;
+    padding: 4px 10px;
+    white-space: nowrap; /* keep each word on one line inside its pill */
+}
+
+/* keep the two segmented groups in header-right from sticking together */
+.header-right .cs-seg-icons + .cs-seg-icons {
+    margin-left: 12px; /* space between view toggle and layout toggle */
+}
+
+/* make sure the first layout button doesn't inherit the negative margin
+   from the generic segmented-control styles */
+.cs-seg--layout .seg:first-child {
+    margin-left: 0 !important;
 }
 
 /* keep it in the top-right on desktop */
@@ -156,3 +182,31 @@
         grid-template-columns: minmax(0, 1fr);
     }
 }
+
+/* ---------- Layout toggle pills (Basic / Enthusiast / Custom) ---------- */
+
+.cs-seg--layout {
+    display: inline-flex;
+}
+
+    /* force perfect centering inside each pill */
+    .cs-seg--layout .seg {
+        display: inline-flex; /* override any global button display */
+        align-items: center; /* vertical center */
+        justify-content: center; /* horizontal center */
+        font-size: 12px;
+        height: 28px; /* consistent pill height */
+        padding: 0 12px; /* horizontal padding only */
+        min-width: 80px; /* same visual width for all three */
+        text-align: center;
+        white-space: nowrap;
+        letter-spacing: 0;
+        line-height: 1;
+        margin-left: 0 !important;
+        margin-right: 4px;
+    }
+
+        /* no extra gap after the last pill */
+        .cs-seg--layout .seg:last-child {
+            margin-right: 0;
+        }

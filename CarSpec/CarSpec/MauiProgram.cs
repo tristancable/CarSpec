@@ -1,4 +1,5 @@
 ﻿using CarSpec.Interfaces;
+using CarSpec.Services;
 using CarSpec.Services.Obd;
 using CarSpec.Services.Profiles;
 using CarSpec.Services.Storage;
@@ -27,6 +28,7 @@ namespace CarSpec
             builder.Services.AddSingleton<RecordingService>();
             builder.Services.AddSingleton<ReplayService>();
             builder.Services.AddSingleton<IAppStorage, FileStorage>();
+            builder.Services.AddSingleton<IMaintenanceService, MaintenanceService>();
             builder.Services.AddSyncfusionBlazor();
 
 

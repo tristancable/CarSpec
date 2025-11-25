@@ -1,0 +1,84 @@
+﻿/* Simple list styling that fits your existing card look */
+
+.maint-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.maint-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 12px;
+    border: 1px solid var(--card-border);
+    background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,0));
+    cursor: pointer;
+    transition: border-color .15s ease, background .15s ease, transform .08s ease;
+}
+
+    .maint-item:hover {
+        border-color: var(--btn-hover-border);
+        transform: translateY(-1px);
+    }
+
+.maint-main {
+    min-width: 0;
+}
+
+.maint-title {
+    font-weight: 600;
+    letter-spacing: .4px;
+}
+
+.maint-sub {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+}
+
+.maint-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    font-size: 11px;
+}
+
+.maint-chip {
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--card-border);
+    background: var(--pill-bg);
+}
+
+/* Status colors reuse your good/warn/bad scheme */
+
+.maint-item.good .maint-title {
+    color: var(--cs-green);
+}
+
+.maint-item.warn .maint-title {
+    color: var(--cs-yellow);
+}
+
+.maint-item.bad .maint-title {
+    color: var(--cs-red);
+}
+
+/* Maintenance grid: 2 cards side-by-side on desktop, full-width on mobile */
+
+.cs-grid--maintenance .cs-card.wide {
+    grid-column: span 6;
+}
+
+@media (max-width: 899.98px) {
+    .cs-grid--maintenance .cs-card.wide {
+        grid-column: 1 / -1;
+    }
+}

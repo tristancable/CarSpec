@@ -25,7 +25,6 @@ namespace CarSpec.Services.Obd
 
         private readonly ObdDataRegistry _registry = ObdDataRegistry.Default;
 
-        // Capability + resilience
         private HashSet<string> _supportedPids = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, int> _noDataStrikes = new(StringComparer.OrdinalIgnoreCase);
         private const int NoDataStrikeLimit = 3;
@@ -33,25 +32,24 @@ namespace CarSpec.Services.Obd
         public enum ProfileMatchResult
         {
             Match,
-            SoftUnknown,   // VIN missing → allow & learn
-            SoftMismatch,  // minor discrepancy → warn
-            HardMismatch   // VIN/WMI conflict → block if locked
+            SoftUnknown,
+            SoftMismatch,
+            HardMismatch
         }
 
         public VehicleProfile? CurrentProfile => _profiles.Current;
 
         public bool SimulationMode { get; set; } = true;
+
         public bool IsConnected => _adapter?.IsConnected ?? false;
         public bool IsConnecting { get; private set; }
         public bool IsCancelRequested => _connectCts?.IsCancellationRequested == true;
         public bool IsAdapterConnected { get; private set; }
         public bool IsEcuConnected { get; private set; }
 
-        // Protocol-aware tuning
-        private bool _isIso;             // true when ECU protocol is ISO/K-Line
-        private int _pidTimeoutMs = 600; // tuned after connect based on protocol
+        private bool _isIso;
+        private int _pidTimeoutMs = 600;
 
-        // Logging ring buffer
         private readonly object _logLock = new();
         private readonly Queue<string> _logQ = new();
         private const int MaxLogLines = 500;
@@ -65,12 +63,12 @@ namespace CarSpec.Services.Obd
         public event Action<string>? OnLog;
         public event Action<CarData>? OnData;
 
-        // NEW: page can subscribe and call StateHasChanged()
         public event Action? OnStateChanged;
         private void Notify() => OnStateChanged?.Invoke();
 
         /// <summary>For telemetry/UX: last computed poll plan.</summary>
         public IReadOnlyList<string> CurrentPollPlan { get; private set; } = new List<string>();
+
         public IReadOnlyList<string> GetLogSnapshot()
         {
             lock (_logLock) return _logQ.ToList();
@@ -84,9 +82,10 @@ namespace CarSpec.Services.Obd
             }
         }
 
-        public ObdConnectionService(IVehicleProfileService profiles,
-                            Telemetry.RecordingService rec,
-                            Telemetry.ReplayService replay)
+        public ObdConnectionService(
+            IVehicleProfileService profiles,
+            Telemetry.RecordingService rec,
+            Telemetry.ReplayService replay)
         {
             _profiles = profiles;
             _rec = rec;
@@ -171,7 +170,6 @@ namespace CarSpec.Services.Obd
 
                 ct.ThrowIfCancellationRequested();
 
-                // Token-aware adapter connect
                 var ok = await _adapter!.ConnectAsync(ct);
 
                 IsAdapterConnected = _adapter.IsConnected;
@@ -191,7 +189,6 @@ namespace CarSpec.Services.Obd
                     return false;
                 }
 
-                // If ECU hasn’t replied yet, try to wake ISO/KWP before giving up
                 if (!_adapter.IsEcuAwake)
                 {
                     Log("⚠️ ECU not responding — attempting ISO/KWP wake...");
@@ -201,15 +198,14 @@ namespace CarSpec.Services.Obd
 
                     if (!woke)
                     {
-                        Log("⚠️ ECU still not responding — staying in Simulation Mode.");
+                        Log("⚠️ ECU still not responding — staying non-live (no ECU data).");
                         SimulationMode = true;
                         _obdService = null;
                         Notify();
-                        return true; // adapter connected, ECU asleep
+                        return true;
                     }
                 }
 
-                // ECU awake → notify UI ASAP
                 OnFingerprint?.Invoke(_adapter.LastFingerprint);
 
                 _obdService = new ObdService(_adapter);
@@ -217,10 +213,8 @@ namespace CarSpec.Services.Obd
                 Log("✅ Live OBD connected.");
                 Notify();
 
-                // ---------- Fingerprint / profile enforcement ----------
                 ct.ThrowIfCancellationRequested();
 
-                // Get/refresh fingerprint (VIN may appear on a 2nd try on ISO)
                 _lastFp = _adapter.LastFingerprint ?? await _adapter.ReadFingerprintAsync(ct);
                 if (string.IsNullOrWhiteSpace(_lastFp?.Vin))
                 {
@@ -229,7 +223,6 @@ namespace CarSpec.Services.Obd
                 }
                 OnFingerprint?.Invoke(_lastFp);
 
-                // 🔒 Mismatch gate BEFORE any learning/persist
                 await _profiles.LoadAsync();
                 var curProfile = _profiles.Current;
                 if (curProfile != null && _lastFp != null)
@@ -253,42 +246,29 @@ namespace CarSpec.Services.Obd
                         Log("⚠️ Connected vehicle doesn’t strongly match the selected profile. Proceeding.");
                 }
 
-                // Learn (optional) AFTER gate
-                //if (_lastFp is not null)
-                //{
-                //    try { await _profiles.LearnFromFingerprintAsync(_lastFp, transport: "BLE"); }
-                //    catch (Exception ex) { Log($"ℹ️ LearnFromFingerprint skipped: {ex.Message}"); }
-                //}
-
-                // ---- Decide if we actually need to persist anything this time ----
                 await _profiles.LoadAsync();
                 var cur = _profiles.Current;
 
-                // Always compute these for the decision + logging
                 var supportedNow = _adapter.GetSupportedPids()?.ToList() ?? new List<string>();
-                var newProtoRaw = _lastFp?.Protocol;                   // e.g., "AUTO, ISO 9141-2"
-                var newProto = NormalizeProtocol(newProtoRaw);      // e.g., "ISO 9141-2"
+                var newProtoRaw = _lastFp?.Protocol;                 // e.g., "AUTO, ISO 9141-2"
+                var newProto = NormalizeProtocol(newProtoRaw);       // e.g., "ISO 9141-2"
                 var oldProto = NormalizeProtocol(cur?.ProtocolDetected);
                 var oldSupported = cur?.SupportedPidsCache ?? new List<string>();
 
-                // Brand-new profile if it has never been connected or has no learned fields
                 bool isBrandNew =
                     cur is null ||
                     cur.LastConnectedUtc == default ||
                     string.IsNullOrWhiteSpace(cur.ProtocolDetected) ||
                     (cur.SupportedPidsCache is null || cur.SupportedPidsCache.Count == 0);
 
-                // Treat normalization from "AUTO, X" -> "X" as a change
                 bool protoChanged = !string.Equals(newProto ?? "", oldProto ?? "", StringComparison.OrdinalIgnoreCase);
                 bool pidsChanged = !SameSet(supportedNow, oldSupported);
 
-                // If we learned any new identity bits, that alone should trigger a save
                 bool hasNewIdentityBits =
                     !string.IsNullOrWhiteSpace(_lastFp?.Vin) ||
                     !string.IsNullOrWhiteSpace(_lastFp?.Wmi) ||
                     (_lastFp?.Year.HasValue ?? false);
 
-                // Helpful pre-save diagnostics
                 var lastConnectedStr = (cur?.LastConnectedUtc.HasValue == true)
                     ? cur!.LastConnectedUtc!.Value.ToString("u")
                     : "∅";
@@ -296,12 +276,10 @@ namespace CarSpec.Services.Obd
                 Log($"🔎 Pre-save check: oldProto='{cur?.ProtocolDetected ?? "∅"}', newProto='{newProtoRaw ?? "∅"}' (norm='{newProto ?? "∅"}'), " +
                     $"oldPIDCount={oldSupported.Count}, newPIDCount={supportedNow.Count}, lastConnected={lastConnectedStr}");
 
-                // Final decision
                 bool needsPersist = isBrandNew || protoChanged || pidsChanged || hasNewIdentityBits;
 
                 if (needsPersist)
                 {
-                    // Write back the normalized protocol immediately so UI doesn’t keep showing “AUTO, …”
                     if (cur is not null && !string.IsNullOrWhiteSpace(newProto) &&
                         !string.Equals(cur.ProtocolDetected ?? "", newProto, StringComparison.OrdinalIgnoreCase))
                     {
@@ -322,7 +300,6 @@ namespace CarSpec.Services.Obd
 
                 Notify();
 
-                // ---- Cadence / protocol tuning ----
                 if (_adapter is not null)
                 {
                     _pidTimeoutMs = _adapter.CurrentPidTimeoutMs;
@@ -339,7 +316,6 @@ namespace CarSpec.Services.Obd
 
                 Log(_isIso ? "🛠 Using ISO-safe cadence." : "🛠 Using CAN-fast cadence.");
 
-                // Start live loop last, after persistence is done
                 await EnsureLiveLoopRunningAsync(_ => Notify());
 
                 return true;
@@ -381,15 +357,21 @@ namespace CarSpec.Services.Obd
             CancelLiveLoop();
             Notify();
 
-            await _replay.StartAsync(recordingId, async cd =>
-            {
-                LastSnapshot = cd;
-                OnData?.Invoke(cd);
-                Notify();
-                await Task.CompletedTask;
-            },
-            onStop: () => { Log("⏹️ Replay finished"); Notify(); },
-            speed: speed);
+            await _replay.StartAsync(
+                recordingId,
+                async cd =>
+                {
+                    LastSnapshot = cd;
+                    OnData?.Invoke(cd);
+                    Notify();
+                    await Task.CompletedTask;
+                },
+                onStop: () =>
+                {
+                    Log("⏹️ Replay finished");
+                    Notify();
+                },
+                speed: speed);
 
             Log($"▶️ Replay started (id={recordingId}, {speed}x).");
             return true;
@@ -442,11 +424,9 @@ namespace CarSpec.Services.Obd
                 return false;
             }
 
-            // 1) AUTO protocol, generous timeout
             if (await ProbeAsync(timeoutMs: 1600, attempts: 2, note: "AUTO"))
                 return true;
 
-            // 2) Force ISO 9141-2 (ATSP3) then probe
             try
             {
                 await _adapter.SendCommandAsync("ATSP3");
@@ -456,7 +436,6 @@ namespace CarSpec.Services.Obd
             }
             catch { /* ignore */ }
 
-            // 3) KWP2000 5-baud (ATSP4)
             try
             {
                 await _adapter.SendCommandAsync("ATSP4");
@@ -466,7 +445,6 @@ namespace CarSpec.Services.Obd
             }
             catch { /* ignore */ }
 
-            // 4) KWP2000 fast init (ATSP5)
             try
             {
                 await _adapter.SendCommandAsync("ATSP5");
@@ -476,7 +454,6 @@ namespace CarSpec.Services.Obd
             }
             catch { /* ignore */ }
 
-            // 5) Fall back to AUTO
             try { await _adapter.SendCommandAsync("ATSP0"); } catch { /* ignore */ }
 
             return false;
@@ -484,7 +461,6 @@ namespace CarSpec.Services.Obd
 
         private static ProfileMatchResult ValidateProfileMatch(VehicleProfile profile, EcuFingerprint fp)
         {
-            // If VINs disagree, that's a hard mismatch
             var profVin = !string.IsNullOrWhiteSpace(profile.VinLast) ? profile.VinLast : profile.LastKnownVin;
             if (!string.IsNullOrWhiteSpace(profVin) && !string.IsNullOrWhiteSpace(fp.Vin))
             {
@@ -492,9 +468,8 @@ namespace CarSpec.Services.Obd
                     return ProfileMatchResult.HardMismatch;
             }
 
-            // If VIN is missing, trust the selected profile's Id as the authority.
             if (string.IsNullOrWhiteSpace(fp.Vin))
-                return ProfileMatchResult.Match;   // Let the current profile Id “own” the session
+                return ProfileMatchResult.Match;
 
             if (!string.IsNullOrWhiteSpace(profile.WmiLast) && !string.IsNullOrWhiteSpace(fp.Wmi))
             {
@@ -524,19 +499,16 @@ namespace CarSpec.Services.Obd
                 return;
             }
 
-            // Use profile.Id as the stable identity if VIN is missing
             var profileKey = cur.Id ?? VehicleKey(cur);
 
-            // Normalize protocol (store only the concrete part, drop the leading AUTO)
             var resolvedProto = NormalizeProtocol(fp.Protocol) ?? NormalizeProtocol(cur.ProtocolDetected);
 
             bool changed = false;
 
-            // Only write VIN/WMI/Year if we actually learned something new and the slot is empty.
             if (!string.IsNullOrWhiteSpace(fp.Vin) && string.IsNullOrWhiteSpace(cur.VinLast))
             {
                 cur.VinLast = fp.Vin;
-                cur.LastKnownVin = fp.Vin; // legacy mirror
+                cur.LastKnownVin = fp.Vin;
                 changed = true;
             }
 
@@ -559,7 +531,6 @@ namespace CarSpec.Services.Obd
                 changed = true;
             }
 
-            // Only update PID cache if it actually changed (prevents noisy re-saves)
             var newPidList = (supportedNow ?? Array.Empty<string>()).ToList();
             if (!SameSet(newPidList, cur.SupportedPidsCache ?? new List<string>()))
             {
@@ -567,12 +538,11 @@ namespace CarSpec.Services.Obd
                 changed = true;
             }
 
-            // Always refresh LastConnectedUtc when we truly learned/changed something
             if (changed)
             {
                 cur.LastConnectedUtc = DateTime.UtcNow;
 
-                await _profiles.SetCurrentAsync(cur); // keep Current in sync
+                await _profiles.SetCurrentAsync(cur);
                 await _profiles.UpsertAsync(cur);
 
                 Log($"🗂 Saved to profile (Id={profileKey}): " +
@@ -612,7 +582,7 @@ namespace CarSpec.Services.Obd
             IsEcuConnected = false;
             SimulationMode = true;
 
-            Log("🧹 Disconnection complete, back to Simulation Mode.");
+            Log("🧹 Disconnection complete, back to idle (no live ECU).");
             Notify();
             return Task.CompletedTask;
         }
@@ -644,7 +614,6 @@ namespace CarSpec.Services.Obd
                     _lastFp = _adapter.LastFingerprint ?? await _adapter.ReadFingerprintAsync();
                     OnFingerprint?.Invoke(_lastFp);
 
-                    // Refresh/persist resolved protocol after reconnect
                     await _profiles.LoadAsync();
                     var curProfile = _profiles.Current;
                     if (curProfile != null && _lastFp != null)
@@ -676,7 +645,6 @@ namespace CarSpec.Services.Obd
 
                     await _profiles.LearnFromFingerprintAsync(_lastFp!, transport: "BLE");
 
-                    // Re-apply protocol tuning after reconnect
                     if (_adapter is not null)
                     {
                         _pidTimeoutMs = _adapter.CurrentPidTimeoutMs;
@@ -710,13 +678,14 @@ namespace CarSpec.Services.Obd
 
         public async Task<CarData> GetLatestDataAsync()
         {
-            if (SimulationMode || _obdService == null)
-                return CarData.Simulated();
+            if (_obdService != null && !SimulationMode)
+                return await _obdService.GetLatestDataAsync();
 
-            return await _obdService.GetLatestDataAsync();
+            if (LastSnapshot != null)
+                return LastSnapshot;
+
+            return new CarData { LastUpdated = DateTime.Now };
         }
-
-        // ---------- Capability discovery ----------
 
         private async Task EnsureCapabilitiesAsync()
         {
@@ -751,7 +720,7 @@ namespace CarSpec.Services.Obd
 
             if (_adapter == null || !_adapter.IsConnected || SimulationMode)
             {
-                Log("⚠️ Cannot start live data loop — adapter not connected or in Simulation Mode.");
+                Log("⚠️ Cannot start live data loop — adapter not connected or not in live ECU mode.");
                 _liveCts = null;
                 return;
             }
@@ -808,13 +777,34 @@ namespace CarSpec.Services.Obd
             CurrentPollPlan = desired.ToList();
             Log($"📋 Poll plan → fast[{string.Join(",", fast)}], medium[{string.Join(",", medium)}], slow[{string.Join(",", slow)}]");
 
-            var fastInterval = isIso ? TimeSpan.FromMilliseconds(260) : TimeSpan.FromMilliseconds(120);
-            var medInterval = isIso ? TimeSpan.FromMilliseconds(520) : TimeSpan.FromMilliseconds(300);
-            var slowInterval = isIso ? TimeSpan.FromMilliseconds(1400) : TimeSpan.FromMilliseconds(900);
+            // Declare the cadence variables
+            TimeSpan fastInterval;
+            TimeSpan medInterval;
+            TimeSpan slowInterval;
+            int gapFastMs;
+            int gapMedMs;
+            int gapSlowMs;
 
-            int gapFastMs = isIso ? 90 : 18;
-            int gapMedMs = isIso ? 110 : 24;
-            int gapSlowMs = isIso ? 130 : 30;
+            if (isIso)
+            {
+                fastInterval = TimeSpan.FromMilliseconds(160);
+                medInterval = TimeSpan.FromMilliseconds(400);
+                slowInterval = TimeSpan.FromMilliseconds(1100);
+
+                gapFastMs = 15;
+                gapMedMs = 35;
+                gapSlowMs = 60;
+            }
+            else
+            {
+                fastInterval = TimeSpan.FromMilliseconds(120);
+                medInterval = TimeSpan.FromMilliseconds(300);
+                slowInterval = TimeSpan.FromMilliseconds(900);
+
+                gapFastMs = 10;
+                gapMedMs = 20;
+                gapSlowMs = 30;
+            }
 
             int strikeLimit = isIso ? 10 : NoDataStrikeLimit;
             var corePids = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "010C", "010D" };
@@ -823,7 +813,7 @@ namespace CarSpec.Services.Obd
 
             CarData? _last = LastSnapshot;
 
-            // PRIME: push an immediate snapshot so UI renders right away
+            // PRIME: push an immediate snapshot so UI can render structure right away
             if (LastSnapshot == null)
             {
                 LastSnapshot = new CarData { LastUpdated = DateTime.Now };
@@ -1013,7 +1003,6 @@ namespace CarSpec.Services.Obd
 
             Plugin.BLE.Abstractions.Contracts.IDevice? device = null;
 
-            // Preferred adapter name (exact)
             var preferred = profile?.PreferredAdapterName?.Trim();
             if (!string.IsNullOrWhiteSpace(preferred))
             {
@@ -1024,7 +1013,6 @@ namespace CarSpec.Services.Obd
                     Log($"⚠️ Preferred adapter '{preferred}' not found — trying common names...");
             }
 
-            // Common patterns
             if (device == null)
             {
                 var patterns = new (string a, string b)[] { ("VEEPEAK", "OBD"), ("OBDII", "ELM"), ("V-LINK", "OBD"), ("FIXD", "OBD") };
@@ -1041,7 +1029,7 @@ namespace CarSpec.Services.Obd
 
             if (device == null)
             {
-                Log("❌ No compatible BLE device found. Staying in Simulation Mode.");
+                Log("❌ No compatible BLE device found. Staying non-live (no ECU data).");
                 SimulationMode = true;
                 IsAdapterConnected = false;
                 IsEcuConnected = false;
@@ -1060,10 +1048,6 @@ namespace CarSpec.Services.Obd
         }
 
         // ---------- Misc helpers ----------
-
-        private static bool NonEmptyEq(string? a, string? b) =>
-            !string.IsNullOrWhiteSpace(a) && !string.IsNullOrWhiteSpace(b) &&
-            string.Equals(a!.Trim(), b!.Trim(), StringComparison.OrdinalIgnoreCase);
 
         private static bool SameSet(IReadOnlyCollection<string>? a, IReadOnlyCollection<string>? b)
         {

@@ -38,6 +38,16 @@ else
                 {
                     <!-- Edit form -->
                     <div class="cs-stat">
+                        <span class="label">Nickname</span>
+                        <InputText @bind-Value="_edit.ProfileName" />
+                    </div>
+
+                    <div class="cs-stat">
+                        <span class="label">Odometer (mi)</span>
+                        <InputNumber @bind-Value="_edit.OdometerMiles" />
+                    </div>
+
+                    <div class="cs-stat">
                         <span class="label">Adapter Name</span>
                         <InputText @bind-Value="_edit.PreferredAdapterName" placeholder="e.g., VEEPEAK" />
                     </div>
@@ -69,6 +79,30 @@ else
                         <span class="label">Adapter Type</span>
                         <span class="value">@DisplayTransport(c.PreferredTransport)</span>
                     </div> *@
+
+                    @if (!string.IsNullOrWhiteSpace(c.ProfileName))
+                    {
+                        <div class="cs-stat">
+                            <span class="label">Nickname</span>
+                            <span class="value">@c.ProfileName</span>
+                        </div>
+                    }
+
+                    @if (c.OdometerMiles.HasValue)
+                    {
+                        <div class="cs-stat">
+                            <span class="label">Odometer</span>
+                            <span class="value">@c.OdometerMiles.Value.ToString("N0") mi</span>
+                        </div>
+                    }
+
+                    @if (c.OdometerUpdatedUtc.HasValue)
+                    {
+                        <div class="cs-stat">
+                            <span class="label">Mileage updated</span>
+                            <span class="value">@c.OdometerUpdatedUtc.Value.ToLocalTime().ToString("yyyy-MM-dd")</span>
+                        </div>
+                    }
 
                     @if (!string.IsNullOrWhiteSpace(c.PreferredAdapterName))
                     {
@@ -244,10 +278,12 @@ else
 
     private sealed class EditDto
     {
+        public string? ProfileName { get; set; }
         public string? PreferredAdapterName { get; set; }
         public int? TachMaxRpm { get; set; }
         public int? TachRedlineStart { get; set; }
         public int? SpeedMaxMph { get; set; }
+        public int? OdometerMiles { get; set; }
     }
 
     private static string KeyOf(VehicleProfile v) => $"{v.Year}|{v.Make}|{v.Model}";
@@ -287,10 +323,12 @@ else
         _editingKey = KeyOf(v);
         _edit = new EditDto
         {
+            ProfileName = v.ProfileName,
             PreferredAdapterName = v.PreferredAdapterName,
             TachMaxRpm = v.TachMaxRpm,
             TachRedlineStart = v.TachRedlineStart,
-            SpeedMaxMph = v.SpeedMaxMph
+            SpeedMaxMph = v.SpeedMaxMph,
+            OdometerMiles = v.OdometerMiles,
         };
     }
 
@@ -307,6 +345,7 @@ else
         var updated = new VehicleProfile
         {
             Id = string.IsNullOrWhiteSpace(original.Id) ? Guid.NewGuid().ToString("N") : original.Id,
+            ProfileName = _edit.ProfileName,
             Year = original.Year,
             Make = original.Make,
             Model = original.Model,
@@ -318,6 +357,11 @@ else
             TachMaxRpm = _edit.TachMaxRpm,
             TachRedlineStart = _edit.TachRedlineStart,
             SpeedMaxMph = _edit.SpeedMaxMph,
+
+            OdometerMiles       = _edit.OdometerMiles,
+            OdometerUpdatedUtc  = _edit.OdometerMiles.HasValue
+                                    ? DateTime.UtcNow
+                                    : original.OdometerUpdatedUtc,
 
             // keep any previously learned/advanced settings
             ProtocolHint = original.ProtocolHint,
@@ -352,19 +396,15 @@ else
     {
         if (_cars is null) return;
 
-        // Remove from service (preferred)
-        // If your service doesn’t have Remove by Y/M/M, use Id when available
         if (!string.IsNullOrWhiteSpace(v.Id))
         {
             await Profiles.RemoveAsync(v.Id);
         }
         else
         {
-            // fallback: manual prune + persist (matches your original logic)
             _cars.RemoveAll(x => SameCar(x, v));
         }
 
-        // If we deleted the active one, pick another (original behavior)
         if (Profiles.Current is not null && SameCar(Profiles.Current, v))
         {
             var fresh = await Profiles.GetAllAsync();
@@ -381,7 +421,6 @@ else
             }
         }
 
-        // Reload for UI
         _cars = await Profiles.GetAllAsync();
         StateHasChanged();
         await RefreshCarsAsync();
@@ -407,7 +446,6 @@ else
     private static string FormatUtc(DateTime? dt)
     {
         if (dt is null || dt == default) return "—";
-        // Show local time nicely; fallback to UTC if needed
         var local = dt.Value.ToLocalTime();
         return local.ToString("yyyy-MM-dd HH:mm");
     }

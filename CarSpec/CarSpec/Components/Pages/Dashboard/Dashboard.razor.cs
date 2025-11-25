@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Threading;
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
@@ -15,7 +15,6 @@ namespace CarSpec.Components.Pages.Dashboard
 {
     public partial class Dashboard : ComponentBase, IAsyncDisposable
     {
-        // Injects
         [Inject] public ObdConnectionService ObdService { get; set; } = default!;
         [Inject] public IJSRuntime JS { get; set; } = default!;
         [Inject] public IVehicleProfileService Profiles { get; set; } = default!;
@@ -26,10 +25,228 @@ namespace CarSpec.Components.Pages.Dashboard
 
         private CarData? carData;
         private readonly List<string> outputLog = new();
-        private CancellationTokenSource? _simCts;
-        private readonly TimeSpan _simTick = TimeSpan.FromSeconds(1);
+
         private enum DisplayMode { Gauges, Numbers }
         private DisplayMode _view = DisplayMode.Gauges;
+
+        private enum DashboardLayoutMode
+        {
+            Basic,
+            Enthusiast,
+            Custom
+        }
+
+        private DashboardLayoutMode _layoutMode = DashboardLayoutMode.Basic;
+
+        private static readonly string[] BasicGaugePids =
+        {
+            PID_RPM,
+            PID_SPEED,
+            PID_COOLANT,
+            PID_FUEL
+        };
+
+        private HashSet<string> _customVisiblePids = new(StringComparer.OrdinalIgnoreCase);
+
+        private readonly HashSet<string> _replayAvailablePids = new(StringComparer.OrdinalIgnoreCase);
+
+        private static readonly Dictionary<string, Func<CarData?, object?>> _pidAccessors =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                { PID_RPM,       cd => cd?.RPM },
+                { PID_SPEED,     cd => cd?.Speed },
+                { PID_TPS,       cd => cd?.ThrottlePercent },
+                { PID_FUEL,      cd => cd?.FuelLevelPercent },
+                { PID_COOLANT,   cd => cd?.CoolantTempF },
+                { PID_OIL,       cd => cd?.OilTempF },
+                { PID_IAT,       cd => cd?.IntakeTempF },
+                { PID_LOAD,      cd => cd?.EngineLoadPercent },
+                { PID_FPRESS,    cd => cd?.FuelPressureKpa },
+                { PID_MAP,       cd => cd?.MapKpa },
+                { PID_TADV,      cd => cd?.TimingAdvanceDeg },
+                { PID_MAF,       cd => cd?.MafGramsPerSec },
+                { PID_BARO,      cd => cd?.BaroKPa },
+                { PID_FRP_REL,   cd => cd?.FuelRailPressureRelKPa },
+                { PID_FRP_GAUGE, cd => cd?.FuelRailGaugePressureKPa },
+                { PID_EGR_CMD,   cd => cd?.CommandedEgrPercent },
+                { PID_EGR_ERR,   cd => cd?.EgrErrorPercent },
+                { PID_EVAP_CMD,  cd => cd?.CommandedEvapPurgePercent },
+                { PID_EVAP_P,    cd => cd?.EvapVaporPressurePa },
+                { PID_WARMUPS,   cd => cd?.WarmUpsSinceClear },
+                { PID_DIST_MIL,  cd => cd?.DistanceWithMilKm },
+                { PID_DIST_CLR,  cd => cd?.DistanceSinceClearKm }
+            };
+
+        private static bool IsBasicPid(string pid) =>
+            Array.IndexOf(BasicGaugePids, pid) >= 0;
+
+        private bool IsLayout(DashboardLayoutMode mode) => _layoutMode == mode;
+
+        private sealed class CustomMetricOption
+        {
+            public string Pid { get; init; } = "";
+            public string Label { get; init; } = "";
+        }
+
+        private IEnumerable<CustomMetricOption> GetCustomCandidates()
+        {
+            var all = new List<CustomMetricOption>
+            {
+                new() { Pid = PID_RPM,        Label = "RPM" },
+                new() { Pid = PID_SPEED,      Label = "Speed" },
+                new() { Pid = PID_TPS,        Label = "Throttle" },
+                new() { Pid = PID_FUEL,       Label = "Fuel" },
+                new() { Pid = PID_COOLANT,    Label = "Coolant" },
+                new() { Pid = PID_OIL,        Label = "Oil Temp" },
+                new() { Pid = PID_IAT,        Label = "Intake Air" },
+                new() { Pid = PID_LOAD,       Label = "Engine Load" },
+                new() { Pid = PID_FPRESS,     Label = "Fuel Pressure" },
+                new() { Pid = PID_MAP,        Label = "MAP" },
+                new() { Pid = PID_TADV,       Label = "Timing" },
+                new() { Pid = PID_MAF,        Label = "MAF" },
+                new() { Pid = PID_BARO,       Label = "Barometric Pressure" },
+                new() { Pid = PID_FRP_REL,    Label = "Fuel Rail (rel)" },
+                new() { Pid = PID_FRP_GAUGE,  Label = "Fuel Rail (gauge)" },
+                new() { Pid = PID_EGR_CMD,    Label = "Cmd EGR" },
+                new() { Pid = PID_EGR_ERR,    Label = "EGR Error" },
+                new() { Pid = PID_EVAP_CMD,   Label = "Cmd EVAP Purge" },
+                new() { Pid = PID_EVAP_P,     Label = "EVAP Vapor Pressure" },
+                new() { Pid = PID_WARMUPS,    Label = "Warm-ups" },
+                new() { Pid = PID_DIST_MIL,   Label = "Distance w/ MIL" },
+                new() { Pid = PID_DIST_CLR,   Label = "Distance since clear" }
+            };
+
+            return all.Where(opt => IsMetricAvailable(opt.Pid));
+        }
+
+        private bool IsCustomOn(string pid)
+        {
+            if (_customVisiblePids.Count == 0 && _layoutMode == DashboardLayoutMode.Custom)
+                return IsBasicPid(pid);
+
+            return _customVisiblePids.Contains(pid);
+        }
+
+        private async Task OnCustomToggle(string pid, ChangeEventArgs e)
+        {
+            bool isOn = e?.Value is bool b && b;
+
+            ToggleCustomPid(pid, isOn);
+            await SaveDashboardPrefsAsync();
+
+            if (_view == DisplayMode.Gauges)
+            {
+                gaugeReady = false;
+                await DisposeGaugesAsync(all: true);
+                StateHasChanged();
+                await Task.Yield();
+                await EnsureGaugesInitializedAsync();
+            }
+            else
+            {
+                StateHasChanged();
+            }
+        }
+
+        private async Task ChangeLayout(DashboardLayoutMode mode)
+        {
+            if (_layoutMode == mode) return;
+
+            _layoutMode = mode;
+
+            if (mode == DashboardLayoutMode.Custom && _customVisiblePids.Count == 0)
+            {
+                foreach (var pid in BasicGaugePids)
+                    _customVisiblePids.Add(pid);
+            }
+
+            await SaveDashboardPrefsAsync();
+
+            if (_view == DisplayMode.Gauges)
+            {
+                gaugeReady = false;
+                await DisposeGaugesAsync(all: true);
+                StateHasChanged();
+                await Task.Yield();
+                await EnsureGaugesInitializedAsync();
+            }
+            else
+            {
+                StateHasChanged();
+            }
+        }
+
+        private void ToggleCustomPid(string pid, bool isOn)
+        {
+            if (isOn) _customVisiblePids.Add(pid);
+            else _customVisiblePids.Remove(pid);
+        }
+        // === END layout bits ===
+
+        // --- Dashboard per-profile preferences ---
+        private sealed class DashboardPreferences
+        {
+            public string ViewMode { get; set; } = nameof(DisplayMode.Gauges);
+            public string LayoutMode { get; set; } = nameof(DashboardLayoutMode.Enthusiast);
+            public List<string>? CustomPids { get; set; }
+        }
+
+        private const string DashPrefsPrefix = "dashboard:prefs:";
+
+        private string GetPrefsKey()
+        {
+            var p = Profiles?.Current;
+            if (p is null) return "";
+
+            if (!string.IsNullOrWhiteSpace(p.Id))
+                return $"{DashPrefsPrefix}{p.Id}";
+
+            return $"{DashPrefsPrefix}{p.Year}|{p.Make}|{p.Model}";
+        }
+
+        private async Task LoadDashboardPrefsAsync()
+        {
+            var key = GetPrefsKey();
+            if (string.IsNullOrWhiteSpace(key)) return;
+
+            try
+            {
+                var prefs = await Storage.GetAsync<DashboardPreferences>(key);
+                if (prefs is null) return;
+
+                if (Enum.TryParse<DisplayMode>(prefs.ViewMode, out var view))
+                    _view = view;
+
+                if (Enum.TryParse<DashboardLayoutMode>(prefs.LayoutMode, out var layout))
+                    _layoutMode = layout;
+
+                if (prefs.CustomPids is { Count: > 0 })
+                    _customVisiblePids = new HashSet<string>(prefs.CustomPids, StringComparer.OrdinalIgnoreCase);
+            }
+            catch { /* ignore */}
+        }
+
+        private async Task SaveDashboardPrefsAsync()
+        {
+            var key = GetPrefsKey();
+            if (string.IsNullOrWhiteSpace(key)) return;
+
+            var prefs = new DashboardPreferences
+            {
+                ViewMode = _view.ToString(),
+                LayoutMode = _layoutMode.ToString(),
+                CustomPids = _customVisiblePids.Count > 0
+                    ? new List<string>(_customVisiblePids)
+                    : null
+            };
+
+            try
+            {
+                await Storage.SetAsync(key, prefs);
+            }
+            catch { /* ignore */ }
+        }
+
         private bool _needsSetup;
         private bool _attachInProgress;
         private Action<EcuFingerprint?>? _fpHandler;
@@ -42,6 +259,7 @@ namespace CarSpec.Components.Pages.Dashboard
         private bool _isReplaying;
         private bool _isReplayPaused;
         private double _replaySpeed = 1.0;
+
         private bool IsLive => ObdService.IsEcuConnected && !ObdService.SimulationMode;
         private bool ShouldRenderGauges => _isReplaying || (IsLive && _planKnown);
         private bool _isPreparingReplay;
@@ -51,16 +269,64 @@ namespace CarSpec.Components.Pages.Dashboard
 
         private void RunSetup() => Nav.NavigateTo("/setup");
 
-        // --- PID-aware UI state ---
         private HashSet<string> _plan = new(StringComparer.OrdinalIgnoreCase);
         private bool _planKnown => _plan.Count > 0;
-        private bool CanShow(string pid)
+
+        /// <summary>
+        /// Whether this metric is actually available in the current context
+        /// (live poll plan or current recording).
+        /// </summary>
+        private bool IsMetricAvailable(string pid)
         {
-            if (_isReplaying) return true;
-            return _plan.Contains(pid);
+            if (_isReplaying)
+            {
+                if (_replayAvailablePids.Count == 0)
+                    return IsBasicPid(pid);
+
+                return _replayAvailablePids.Contains(pid);
+            }
+
+            if (_planKnown)
+                return _plan.Contains(pid);
+
+            var profilePids = Profiles?.Current?.SupportedPidsCache;
+            if (profilePids is { Count: > 0 })
+                return profilePids.Contains(pid);
+
+            return IsBasicPid(pid);
         }
 
-        // PID constants
+        private bool CanShow(string pid)
+        {
+            if (!IsMetricAvailable(pid))
+                return false;
+
+            if (_isReplaying)
+            {
+                return _layoutMode switch
+                {
+                    DashboardLayoutMode.Basic => IsBasicPid(pid),
+                    DashboardLayoutMode.Enthusiast => true,
+                    DashboardLayoutMode.Custom =>
+                        _customVisiblePids.Count == 0
+                            ? IsBasicPid(pid)
+                            : _customVisiblePids.Contains(pid),
+                    _ => true
+                };
+            }
+
+            return _layoutMode switch
+            {
+                DashboardLayoutMode.Basic => IsBasicPid(pid),
+                DashboardLayoutMode.Enthusiast => true,
+                DashboardLayoutMode.Custom =>
+                    _customVisiblePids.Count == 0
+                        ? IsBasicPid(pid)
+                        : _customVisiblePids.Contains(pid),
+                _ => true
+            };
+        }
+
         private const string PID_RPM = "010C";
         private const string PID_SPEED = "010D";
         private const string PID_TPS = "0111";
@@ -124,6 +390,8 @@ namespace CarSpec.Components.Pages.Dashboard
             await RecomputeNeedsSetupAsync();
             _lastProfileKey = ProfileKey(Profiles?.Current);
 
+            await LoadDashboardPrefsAsync();
+
             try { carData = ObdService.LastSnapshot ?? await ObdService.GetLatestDataAsync(); } catch { }
             try { _replays = await Recorder.ListAsync(); } catch { _replays = new(); }
 
@@ -161,6 +429,31 @@ namespace CarSpec.Components.Pages.Dashboard
             {
                 if (_pendingAttach.IsCompleted)
                     _pendingAttach = AttachLiveStreamAsync();
+            }
+        }
+
+        private void UpdateReplayAvailablePids(CarData? cd)
+        {
+            if (cd is null) return;
+
+            foreach (var kvp in _pidAccessors)
+            {
+                var value = kvp.Value(cd);
+                if (value is null) continue;
+
+                switch (value)
+                {
+                    case int i when i != 0:
+                    case long l when l != 0:
+                    case short s when s != 0:
+                    case byte b when b != 0:
+                    case float f when Math.Abs(f) > float.Epsilon:
+                    case double d when Math.Abs(d) > double.Epsilon:
+                        _replayAvailablePids.Add(kvp.Key);
+                        break;
+                    default:
+                        break;
+                }
             }
         }
 
@@ -262,10 +555,8 @@ namespace CarSpec.Components.Pages.Dashboard
             if (string.IsNullOrWhiteSpace(_selectedReplayId) || _isPreparingReplay)
                 return;
 
-            if (string.IsNullOrWhiteSpace(_selectedReplayId) || _isPreparingReplay) return;
-
             _isPreparingReplay = true;
-            _isReplayPaused = false;   // 👈 ensure we're not "paused" at start
+            _isReplayPaused = false;
             StateHasChanged();
 
             if (_isRecording) await StopRecording();
@@ -273,6 +564,7 @@ namespace CarSpec.Components.Pages.Dashboard
             ObdService.SimulationMode = true;
 
             _isReplaying = true;
+            _replayAvailablePids.Clear();
             StateHasChanged();
 
             if (_view == DisplayMode.Gauges)
@@ -298,6 +590,7 @@ namespace CarSpec.Components.Pages.Dashboard
                 {
                     await InvokeAsync(async () =>
                     {
+                        UpdateReplayAvailablePids(cd);
                         carData = cd;
                         await SafeSetAllGaugesAsync();
                         StateHasChanged();
@@ -306,7 +599,7 @@ namespace CarSpec.Components.Pages.Dashboard
                 onStop: () =>
                 {
                     _isReplaying = false;
-                    _isReplayPaused = false;      // 👈 reset here too
+                    _isReplayPaused = false;
                     _ = InvokeAsync(async () =>
                     {
                         await DisposeGaugesAsync(all: true);
@@ -324,7 +617,7 @@ namespace CarSpec.Components.Pages.Dashboard
             if (!_isReplaying) return Task.CompletedTask;
             Replayer.Stop();
             _isReplaying = false;
-            _isReplayPaused = false;   // 👈 reset
+            _isReplayPaused = false;
             Log("⏹️ Replay stopped.");
             return Task.CompletedTask;
         }
@@ -333,7 +626,7 @@ namespace CarSpec.Components.Pages.Dashboard
         {
             if (!_isReplaying || _isReplayPaused) return Task.CompletedTask;
 
-            Replayer.Pause();          // 👈 we'll add this to ReplayService
+            Replayer.Pause();
             _isReplayPaused = true;
             Log("⏸ Replay paused.");
             StateHasChanged();
@@ -344,7 +637,7 @@ namespace CarSpec.Components.Pages.Dashboard
         {
             if (!_isReplaying || !_isReplayPaused) return Task.CompletedTask;
 
-            Replayer.Resume();         // 👈 and this
+            Replayer.Resume();
             _isReplayPaused = false;
             Log("▶ Replay resumed.");
             StateHasChanged();
@@ -579,7 +872,6 @@ namespace CarSpec.Components.Pages.Dashboard
             if (_needsSetup && ObdService.IsEcuConnected)
             {
                 await ObdService.Disconnect();
-                ObdService.SimulationMode = true;
             }
 
             var key = ProfileKey(Profiles?.Current);
@@ -593,8 +885,11 @@ namespace CarSpec.Components.Pages.Dashboard
 
         private async Task SwitchView(DisplayMode v)
         {
+            if (_view == v) return;
+
             var wasGauges = _view == DisplayMode.Gauges;
             _view = v;
+            await SaveDashboardPrefsAsync();
             StateHasChanged();
 
             if (wasGauges && v != DisplayMode.Gauges)
@@ -655,34 +950,6 @@ namespace CarSpec.Components.Pages.Dashboard
         private static string TempClass(double? f) => f is null ? "" : (f >= 230 ? "bad" : f >= 215 ? "warn" : "good");
         private static string IatClass(double? f) => f is null ? "" : (f >= 150 ? "bad" : f >= 120 ? "warn" : "good");
 
-        private void StartSimulationLoop()
-        {
-            _simCts?.Cancel();
-            _simCts = new CancellationTokenSource();
-            var token = _simCts.Token;
-
-            _ = Task.Run(async () =>
-            {
-                while (!token.IsCancellationRequested)
-                {
-                    try
-                    {
-                        if (ObdService.SimulationMode)
-                        {
-                            carData = CarData.Simulated();
-                            await InvokeAsync(async () =>
-                            {
-                                await SafeSetAllGaugesAsync();
-                                StateHasChanged();
-                            });
-                        }
-                    }
-                    catch { }
-                    try { await Task.Delay(_simTick, token); } catch { }
-                }
-            }, token);
-        }
-
         private async Task SwitchToLive()
         {
             if (_needsSetup) { Nav.NavigateTo("/setup"); return; }
@@ -723,7 +990,7 @@ namespace CarSpec.Components.Pages.Dashboard
                 }
                 else
                 {
-                    Log("⚠️ ECU not responding — staying in Simulation Mode.");
+                    Log("⚠️ ECU not responding — check ignition / key-on and try again.");
                 }
             }
 
@@ -815,7 +1082,6 @@ namespace CarSpec.Components.Pages.Dashboard
         {
             await ObdService.Disconnect();
             await InvokeAsync(StateHasChanged);
-            // ObdService.SimulationMode = true;
         }
 
         private void HandleLog(string message)
@@ -830,15 +1096,17 @@ namespace CarSpec.Components.Pages.Dashboard
         private string GetModeText() =>
             ObdService.IsConnecting
                 ? (ObdService.IsCancelRequested ? "Canceling…" : "Connecting…")
-                : (ObdService.IsEcuConnected ? "Live ECU Connected"
-                   : (ObdService.IsAdapterConnected ? "Adapter Connected (ECU Offline)"
-                      : ObdService.SimulationMode ? "Simulation Mode" : "Disconnected"));
+                : ObdService.IsEcuConnected
+                    ? "Live ECU Connected"
+                    : ObdService.IsAdapterConnected
+                        ? "Adapter Connected (ECU Offline)"
+                        : _isReplaying ? "Replay Mode" : "Disconnected";
 
         private string GetModeClass() =>
             ObdService.IsConnecting ? "is-connecting" :
             ObdService.IsEcuConnected ? "is-live" :
-            (ObdService.IsAdapterConnected ? "is-adapter" :
-            ObdService.SimulationMode ? "is-sim" : "is-disc");
+            ObdService.IsAdapterConnected ? "is-adapter" :
+            _isReplaying ? "is-sim" : "is-disc";
 
         private async Task ZeroOutDataAsync()
         {
@@ -858,9 +1126,6 @@ namespace CarSpec.Components.Pages.Dashboard
 
         public async ValueTask DisposeAsync()
         {
-            _simCts?.Cancel();
-            _simCts = null;
-
             if (gaugeModule is not null)
             {
                 try { await gaugeModule.InvokeVoidAsync("disposeAll"); } catch { }
@@ -878,9 +1143,9 @@ namespace CarSpec.Components.Pages.Dashboard
 
         private static readonly string[] GaugeIds = new[]
         {
-        "rpmGauge","speedGauge","throttleGauge","fuelGauge","coolantGauge",
-        "oilGauge","iatGauge","loadGauge","fpGauge","mapGauge","tadvGauge","mafGauge"
-    };
+            "rpmGauge","speedGauge","throttleGauge","fuelGauge","coolantGauge",
+            "oilGauge","iatGauge","loadGauge","fpGauge","mapGauge","tadvGauge","mafGauge"
+        };
 
         private async Task DisposeGaugesAsync(bool all = false)
         {
@@ -895,11 +1160,11 @@ namespace CarSpec.Components.Pages.Dashboard
                 {
                     foreach (var id in GaugeIds)
                     {
-                        try { await gaugeModule.InvokeVoidAsync("dispose", id); } catch { /* ignore */ }
+                        try { await gaugeModule.InvokeVoidAsync("dispose", id); } catch { }
                     }
                 }
             }
-            catch { /* ignore */ }
+            catch { }
         }
 
         private async Task DebugDumpSelectedRecordingAsync()
@@ -919,7 +1184,7 @@ namespace CarSpec.Components.Pages.Dashboard
 
             var lines = text.Split('\n')
                             .Where(l => !string.IsNullOrWhiteSpace(l))
-                            .Take(20); // don’t spam too hard
+                            .Take(20);
 
             foreach (var line in lines)
             {

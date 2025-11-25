@@ -25,11 +25,11 @@
                       ReplaySelectionChanged="OnReplaySelectionChanged"
                       ReplaySpeedChanged="OnReplaySpeedChanged" />
 
-    <button class="cs-btn btn-secondary cs-btn--sm cs-debug-btn"
+    @* <button class="cs-btn btn-secondary cs-btn--sm cs-debug-btn"
             type="button"
             @onclick="DebugDumpSelectedRecordingAsync">
         Debug Dump Recording
-    </button>
+    </button> *@
 
     @if (_needsSetup || Profiles?.Current == null)
     {
@@ -47,71 +47,144 @@
     }
 
     <div class="cs-controls header-bar">
-      <div class="header-left">
-        <div class="cs-badge cs-badge--panel">
-          <span class="label">Mode:</span>
-          <span class="cs-pill @(GetModeClass())">@GetModeText()</span>
-        </div>
+        <div class="header-left">
+            <div class="cs-badge cs-badge--panel">
+                <span class="label">Mode:</span>
+                <span class="cs-pill @(GetModeClass())">@GetModeText()</span>
+            </div>
 
-        @* Connect / Disconnect buttons *@
-        @if (!ObdService.IsAdapterConnected)
-        {
-            @if (!ObdService.IsConnecting)
+            @* Connect / Disconnect buttons *@
+            @if (!ObdService.IsAdapterConnected)
             {
-                <button class="cs-btn primary" @onclick="SwitchToLive" disabled="@_needsSetup">
-                    🔌 Connect to OBD
+                @if (!ObdService.IsConnecting)
+                {
+                    <button class="cs-btn primary" @onclick="SwitchToLive" disabled="@_needsSetup">
+                        🔌 Connect to OBD
+                    </button>
+                }
+                else
+                {
+                    <button class="cs-btn btn-secondary" @onclick="CancelConnecting" disabled="@_needsSetup">
+                        ⛔ Stop Connecting
+                    </button>
+                }
+            }
+            else if (ObdService.IsAdapterConnected && !ObdService.IsEcuConnected)
+            {
+                <button class="cs-btn btn-secondary" @onclick="ReconnectEcu" disabled="@_needsSetup">
+                    🔁 Reconnect ECU
+                </button>
+                <button class="cs-btn btn-secondary" @onclick="Disconnect" disabled="@_needsSetup">
+                    🔌 Disconnect OBD
                 </button>
             }
-            else
+            else if (ObdService.IsEcuConnected)
             {
-                <button class="cs-btn btn-secondary" @onclick="CancelConnecting" disabled="@_needsSetup">
-                    ⛔ Stop Connecting
+                <button class="cs-btn btn-secondary" @onclick="Disconnect" disabled="@_needsSetup">
+                    🔌 Disconnect OBD
                 </button>
             }
-        }
-        else if (ObdService.IsAdapterConnected && !ObdService.IsEcuConnected)
-        {
-            <button class="cs-btn btn-secondary" @onclick="ReconnectEcu" disabled="@_needsSetup">🔁 Reconnect ECU</button>
-            <button class="cs-btn btn-secondary" @onclick="Disconnect" disabled="@_needsSetup">🔌 Disconnect OBD</button>
-        }
-        else if (ObdService.IsEcuConnected)
-        {
-            <button class="cs-btn btn-secondary" @onclick="Disconnect" disabled="@_needsSetup">🔌 Disconnect OBD</button>
-        }
+        </div>
 
-        <div class="cs-seg-icons" role="tablist" aria-label="Display mode">
-            <button class="seg @( _view == DisplayMode.Gauges ? "active" : null )"
-                    @onclick="() => SwitchView(DisplayMode.Gauges)"
-                    title="Gauges" aria-pressed="@(_view == DisplayMode.Gauges)">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M12 3a9 9 0 0 0-9 9h2a7 7 0 1 1 14 0h2a9 9 0 0 0-9-9z"
-                          fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-                    <path d="M12 13l4.2-4.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-                    <circle cx="12" cy="13" r="1.6" fill="currentColor" />
-                </svg>
-            </button>
+        <div class="header-right">
+            @* Layout mode: Basic / Enthusiast / Custom *@
+            <div class="cs-seg-icons cs-seg--layout" role="tablist" aria-label="Gauge layout">
+                <button class="seg @(IsLayout(DashboardLayoutMode.Basic) ? "active" : null)"
+                        @onclick="() => ChangeLayout(DashboardLayoutMode.Basic)"
+                        title="Simple view (RPM, Speed, Coolant, Fuel)"
+                        aria-pressed="@(IsLayout(DashboardLayoutMode.Basic))">
+                    Basic
+                </button>
 
-            <button class="seg @( _view == DisplayMode.Numbers ? "active" : null )"
-                    @onclick="() => SwitchView(DisplayMode.Numbers)"
-                    title="Numbers" aria-pressed="@(_view == DisplayMode.Numbers)">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M4 8h16M4 16h16M8 4v16M16 4v16"
-                          fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-                </svg>
-            </button>
+                <button class="seg @(IsLayout(DashboardLayoutMode.Enthusiast) ? "active" : null)"
+                        @onclick="() => ChangeLayout(DashboardLayoutMode.Enthusiast)"
+                        title="Full enthusiast view"
+                        aria-pressed="@(IsLayout(DashboardLayoutMode.Enthusiast))">
+                    Enthusiast
+                </button>
+
+                <button class="seg @(IsLayout(DashboardLayoutMode.Custom) ? "active" : null)"
+                        @onclick="() => ChangeLayout(DashboardLayoutMode.Custom)"
+                        title="Custom selection (coming soon)"
+                        aria-pressed="@(IsLayout(DashboardLayoutMode.Custom))">
+                    Custom
+                </button>
+            </div>
+
+            @* View mode: Gauges / Numbers *@
+            <div class="cs-seg-icons" role="tablist" aria-label="Display mode">
+                <button class="seg @( _view == DisplayMode.Gauges ? "active" : null )"
+                        @onclick="() => SwitchView(DisplayMode.Gauges)"
+                        title="Gauges" aria-pressed="@(_view == DisplayMode.Gauges)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 3a9 9 0 0 0-9 9h2a7 7 0 1 1 14 0h2a9 9 0 0 0-9-9z"
+                              fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                        <path d="M12 13l4.2-4.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                        <circle cx="12" cy="13" r="1.6" fill="currentColor" />
+                    </svg>
+                </button>
+
+                <button class="seg @( _view == DisplayMode.Numbers ? "active" : null )"
+                        @onclick="() => SwitchView(DisplayMode.Numbers)"
+                        title="Numbers" aria-pressed="@(_view == DisplayMode.Numbers)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M4 8h16M4 16h16M8 4v16M16 4v16"
+                              fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                    </svg>
+                </button>
+            </div>
         </div>
     </div>
-    </div>
 
-    @if (ObdService.IsEcuConnected)
+    @if (IsLayout(DashboardLayoutMode.Custom))
     {
-            var fp = ObdService.LastFingerprint;
-            var protoDisplay = string.IsNullOrWhiteSpace(fp?.Protocol)
-                ? (Profiles?.Current?.ProtocolDetected ?? "—")
-                : (fp!.Protocol);
-            var vinDisplay = string.IsNullOrWhiteSpace(fp?.Vin) ? $"—  (Profile Id: {Profiles?.Current?.Id ?? "—"})" : fp!.Vin;
-            var pidCount = fp?.SupportedPids?.Count
-                ?? (Profiles?.Current?.SupportedPidsCache?.Count ?? (int?)null);
+        <section class="cs-card cs-card--compact cs-card--custom" style="margin:10px 0 14px;">
+            <div class="cs-custom-header">
+                <h3 style="margin:0 0 4px;">Custom layout</h3>
+                <div class="cs-subtext" style="opacity:.8;font-size:.9rem">
+                    Choose which metrics you want visible on this dashboard.
+                </div>
+            </div>
+
+            <div class="cs-custom-grid" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+                @if (!_planKnown && IsLive)
+                {
+                    <div class="cs-subtext" style="opacity:.8;">
+                        Detecting supported sensors for this vehicle…
+                    </div>
+                }
+                else
+                {
+                    @foreach (var opt in GetCustomCandidates())
+                    {
+                        <label class="cs-toggle" style="display:flex;align-items:center;gap:6px;">
+                            <input type="checkbox"
+                                   checked="@IsCustomOn(opt.Pid)"
+                                   @onchange="(e) => OnCustomToggle(opt.Pid, e)" />
+                            <span>@opt.Label</span>
+                        </label>
+                    }
+
+                    @if (!IsLive && !_planKnown && !GetCustomCandidates().Any())
+                    {
+                        <div class="cs-subtext" style="opacity:.8;">
+                            Connect to a vehicle once so we can learn which sensors it supports.
+                        </div>
+                    }
+                }
+            </div>
+        </section>
+    }
+
+    @* @if (ObdService.IsEcuConnected)
+    {
+        var fp = ObdService.LastFingerprint;
+        var protoDisplay = string.IsNullOrWhiteSpace(fp?.Protocol)
+        ? (Profiles?.Current?.ProtocolDetected ?? "—")
+        : (fp!.Protocol);
+        var vinDisplay = string.IsNullOrWhiteSpace(fp?.Vin) ? $"—  (Profile Id: {Profiles?.Current?.Id ?? "—"})" : fp!.Vin;
+        var pidCount = fp?.SupportedPids?.Count
+        ?? (Profiles?.Current?.SupportedPidsCache?.Count ?? (int?)null);
         <section class="cs-card" style="margin:12px 0">
             <h3>ECU ID</h3>
             <div>VIN: <strong>@vinDisplay</strong></div>
@@ -119,7 +192,7 @@
             <div>Year (from VIN): <strong>@(fp?.Year?.ToString() ?? (Profiles?.Current?.YearDetected?.ToString() ?? "—"))</strong></div>
             <div>Supported PIDs: <strong>@(pidCount?.ToString() ?? "—")</strong></div>
         </section>
-    }
+    } *@
 
     @if (carData is null)
     {

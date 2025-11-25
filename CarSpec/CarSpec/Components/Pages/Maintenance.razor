@@ -1,7 +1,360 @@
-﻿@page "/maintanence"
+﻿@page "/maintenance"
+@using CarSpec.Models
+@using Microsoft.AspNetCore.Components.Forms
+@inject CarSpec.Interfaces.IVehicleProfileService Profiles
+@inject CarSpec.Interfaces.IMaintenanceService MaintenanceService
 
-<h3>Maintenance</h3>
+<div class="container">
+    <h1 class="cs-title" style="font-size:26px;margin:6px 0 12px">Maintenance</h1>
+
+    @if (Profiles?.Current is null)
+    {
+        <section class="cs-card info" style="margin-bottom:12px">
+            <strong>No vehicle selected.</strong>
+            <div class="hint">Pick or create a vehicle in the Garage to track its maintenance.</div>
+        </section>
+    }
+    else
+    {
+        <section class="cs-card info" style="margin-bottom:16px">
+            <div class="cs-card__header">
+                <div>
+                    <div class="hint">Tracking for</div>
+                    <div style="font-family:var(--cs-font);letter-spacing:0.8px">
+                        @Profiles.Current.Make @Profiles.Current.Model (@Profiles.Current.Year)
+                    </div>
+                </div>
+
+                <button class="cs-btn cs-btn--sm" type="button" @onclick="OpenNewItem">
+                    + Add Service
+                </button>
+            </div>
+
+            <div class="cs-stat @(OverallStatusClass)">
+                <span class="label">Car health</span>
+                <span class="value">@OverallStatusText</span>
+            </div>
+        </section>
+
+        <div class="cs-grid cs-grid--maintenance">
+            <!-- Upcoming -->
+            <section class="cs-card wide">
+                <div class="cs-card__header">
+                    <h3>Upcoming</h3>
+                </div>
+
+                @if (!Upcoming.Any())
+                {
+                    <div class="hint">No upcoming items yet. Add your next oil change, tire rotation, or inspection.</div>
+                }
+                else
+                {
+                    <ul class="maint-list">
+                        @foreach (var item in Upcoming)
+                        {
+                            <li class="maint-item @GetStatusClass(item)" @onclick="@(() => Edit(item))">
+                                <div class="maint-main">
+                                    <div class="maint-title">@item.Title</div>
+                                    <div class="maint-sub">
+                                        @FormatDueText(item)
+                                    </div>
+                                </div>
+
+                                <div class="maint-meta">
+                                    @if (item.NextDueOdometer.HasValue)
+                                    {
+                                        <div class="maint-chip">
+                                            @item.NextDueOdometer.Value.ToString("N0") mi
+                                        </div>
+                                    }
+                                    @if (item.NextDueDate.HasValue)
+                                    {
+                                        <div class="maint-chip">
+                                            @item.NextDueDate.Value.ToShortDateString()
+                                        </div>
+                                    }
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
+
+            <!-- History -->
+            <section class="cs-card wide">
+                <div class="cs-card__header">
+                    <h3>History</h3>
+                </div>
+
+                @if (!History.Any())
+                {
+                    <div class="hint">Log things like oil changes or brake jobs so you remember what was done when.</div>
+                }
+                else
+                {
+                    <ul class="maint-list maint-list--history">
+                        @foreach (var item in History)
+                        {
+                            <li class="maint-item" @onclick="@(() => Edit(item))">
+                                <div class="maint-main">
+                                    <div class="maint-title">@item.Title</div>
+                                    <div class="maint-sub">
+                                        Done @item.LastDoneDate?.ToShortDateString()
+                                        @if (item.LastDoneOdometer.HasValue)
+                                        {
+                                            <span> • @item.LastDoneOdometer.Value.ToString("N0") mi</span>
+                                        }
+                                    </div>
+                                </div>
+
+                                <div class="maint-meta">
+                                    @if (item.Cost.HasValue)
+                                    {
+                                        <div class="maint-chip">
+                                            @item.Cost.Value.ToString("C0")
+                                        </div>
+                                    }
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
+        </div>
+    }
+
+    @* Inline Add/Edit panel *@
+    @if (_editingItem is not null)
+    {
+        <section class="cs-card full" style="margin-top:16px">
+            <h3>@(_isNew ? "Add Service" : "Edit Service")</h3>
+
+            <EditForm Model="_editingItem" OnValidSubmit="SaveEditingAsync">
+                <div class="form-grid">
+                    <div class="form-row span-2">
+                        <label>Title <span class="hint hint--required">(required)</span></label>
+                        <InputText class="cs-input" @bind-Value="_editingItem.Title" />
+                    </div>
+
+                    <div class="form-row">
+                        <label>Type</label>
+                        <InputSelect class="cs-input" @bind-Value="_editingItem.Type">
+                            @foreach (var t in Enum.GetValues<MaintenanceType>())
+                            {
+                                <option value="@t">@t</option>
+                            }
+                        </InputSelect>
+                    </div>
+
+                    <div class="form-row">
+                        <label>Last Done Date</label>
+                        <InputDate class="cs-input" @bind-Value="_editingItem.LastDoneDate" />
+                    </div>
+
+                    <div class="form-row">
+                        <label>Last Odometer <span class="unit">mi</span></label>
+                        <InputNumber class="cs-input" @bind-Value="_editingItem.LastDoneOdometer" />
+                    </div>
+
+                    <div class="form-row">
+                        <label>Next Due Date</label>
+                        <InputDate class="cs-input" @bind-Value="_editingItem.NextDueDate" />
+                    </div>
+
+                    <div class="form-row">
+                        <label>Next Due Odometer <span class="unit">mi</span></label>
+                        <InputNumber class="cs-input" @bind-Value="_editingItem.NextDueOdometer" />
+                    </div>
+
+                    <div class="form-row">
+                        <label>Estimated Cost</label>
+                        <InputNumber class="cs-input" @bind-Value="_editingItem.Cost" />
+                    </div>
+
+                    <div class="form-row span-2">
+                        <label>Notes</label>
+                        <InputTextArea class="cs-input" @bind-Value="_editingItem.Notes" rows="3" />
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <button class="cs-btn primary" type="submit">Save</button>
+                    <button class="cs-btn btn-secondary" type="button" @onclick="CancelEdit">Cancel</button>
+
+                    @if (!_isNew)
+                    {
+                        <button class="cs-btn" type="button" @onclick="DeleteEditingAsync">Delete</button>
+                    }
+                </div>
+            </EditForm>
+        </section>
+    }
+</div>
 
 @code {
+    private List<MaintenanceItem> Upcoming = new();
+    private List<MaintenanceItem> History = new();
 
+    // In a real implementation, pull from OBD if connected:
+    private int? _currentOdometer = null;
+
+    private MaintenanceItem? _editingItem;
+    private bool _isNew;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (Profiles?.Current is null)
+        {
+            Upcoming.Clear();
+            History.Clear();
+            _currentOdometer = null;
+            return;
+        }
+
+        var all = await MaintenanceService.GetForVehicleAsync(Profiles.Current.Id);
+
+        // Uses VehicleProfile.OdometerMiles (make sure you added that property)
+        _currentOdometer = Profiles.Current.OdometerMiles;
+
+        var now = DateTime.UtcNow.Date;
+
+        Upcoming = all
+            .Where(m => !m.IsCompleted && (m.NextDueDate.HasValue || m.NextDueOdometer.HasValue))
+            .OrderBy(m => m.NextDueOdometer ?? int.MaxValue)
+            .ThenBy(m => m.NextDueDate ?? DateTime.MaxValue)
+            .ToList();
+
+        History = all
+            .Where(m => m.IsCompleted || (!m.NextDueDate.HasValue && !m.NextDueOdometer.HasValue))
+            .OrderByDescending(m => m.LastDoneDate ?? DateTime.MinValue)
+            .ToList();
+
+        StateHasChanged();
+    }
+
+    private string FormatDueText(MaintenanceItem item)
+    {
+        var parts = new List<string>();
+
+        var milesLeft = item.MilesRemaining(_currentOdometer);
+        if (milesLeft.HasValue)
+        {
+            if (milesLeft.Value < 0)
+                parts.Add($"Overdue by {Math.Abs(milesLeft.Value):N0} mi");
+            else
+                parts.Add($"Due in ~{milesLeft.Value:N0} mi");
+        }
+
+        if (item.NextDueDate.HasValue)
+        {
+            var days = (item.NextDueDate.Value.Date - DateTime.UtcNow.Date).TotalDays;
+            if (days < 0)
+                parts.Add($"Overdue by {Math.Abs((int)days)} days");
+            else
+                parts.Add($"Due in {(int)days} days");
+        }
+
+        return parts.Count == 0 ? "No due info set" : string.Join(" • ", parts);
+    }
+
+    private string GetStatusClass(MaintenanceItem item)
+    {
+        // Use miles or date, whichever is more urgent
+        var milesLeft = item.MilesRemaining(_currentOdometer);
+        var daysLeft = item.NextDueDate.HasValue
+            ? (item.NextDueDate.Value.Date - DateTime.UtcNow.Date).TotalDays
+            : (double?)null;
+
+        bool isOverdue =
+            (milesLeft.HasValue && milesLeft.Value < 0) ||
+            (daysLeft.HasValue && daysLeft.Value < 0);
+
+        bool isSoon =
+            (milesLeft.HasValue && milesLeft.Value <= 1000) ||
+            (daysLeft.HasValue && daysLeft.Value <= 14);
+
+        if (isOverdue) return "bad";
+        if (isSoon) return "warn";
+        return "good";
+    }
+
+    private string OverallStatusClass =>
+        Upcoming.Any(i => GetStatusClass(i) == "bad") ? "bad" :
+        Upcoming.Any(i => GetStatusClass(i) == "warn") ? "warn" :
+        "good";
+
+    private string OverallStatusText =>
+        OverallStatusClass switch
+        {
+            "bad" => "Attention needed",
+            "warn" => "Coming up soon",
+            _ => "All good"
+        };
+
+    private void OpenNewItem()
+    {
+        if (Profiles?.Current is null) return;
+
+        _editingItem = new MaintenanceItem
+        {
+            VehicleProfileId = Profiles.Current.Id,
+            Title = string.Empty,
+            Type = MaintenanceType.Custom,
+            LastDoneDate = DateTime.UtcNow.Date
+        };
+        _isNew = true;
+    }
+
+    private void Edit(MaintenanceItem item)
+    {
+        // Make a copy so editing doesn’t mutate the list until saved
+        _editingItem = new MaintenanceItem
+        {
+            Id = item.Id,
+            VehicleProfileId = item.VehicleProfileId,
+            Type = item.Type,
+            Title = item.Title,
+            Notes = item.Notes,
+            LastDoneDate = item.LastDoneDate,
+            LastDoneOdometer = item.LastDoneOdometer,
+            NextDueDate = item.NextDueDate,
+            NextDueOdometer = item.NextDueOdometer,
+            Cost = item.Cost,
+            IsCompleted = item.IsCompleted
+        };
+        _isNew = false;
+    }
+
+    private async Task SaveEditingAsync()
+    {
+        if (_editingItem is null || Profiles?.Current is null)
+            return;
+
+        // Ensure it’s tied to the active vehicle
+        _editingItem.VehicleProfileId = Profiles.Current.Id;
+
+        await MaintenanceService.SaveAsync(_editingItem);
+        _editingItem = null;
+        await ReloadAsync();
+    }
+
+    private async Task DeleteEditingAsync()
+    {
+        if (_editingItem is null)
+            return;
+
+        await MaintenanceService.DeleteAsync(_editingItem.Id);
+        _editingItem = null;
+        await ReloadAsync();
+    }
+
+    private void CancelEdit()
+    {
+        _editingItem = null;
+    }
 }

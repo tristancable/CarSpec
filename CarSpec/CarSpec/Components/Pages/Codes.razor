@@ -52,20 +52,22 @@
     </div>
   </section>
 
-  <div class="cs-grid">
+  <section class="cs-card" style="margin-bottom:12px">
+    <div class="cs-grid">
     <section class="cs-card wide">
-      <h3>Stored Codes</h3>
-      @RenderCodeList(_snap?.Stored)
+        <h3>Stored Codes</h3>
+        @RenderCodeList(_snap?.Stored)
     </section>
     <section class="cs-card wide">
-      <h3>Pending Codes</h3>
-      @RenderCodeList(_snap?.Pending)
+        <h3>Pending Codes</h3>
+        @RenderCodeList(_snap?.Pending)
     </section>
     <section class="cs-card wide">
-      <h3>Permanent Codes</h3>
-      @RenderCodeList(_snap?.Permanent)
+        <h3>Permanent Codes</h3>
+        @RenderCodeList(_snap?.Permanent)
     </section>
-  </div>
+    </div>
+  </section>
 
   @if (_showConfirm)
   {

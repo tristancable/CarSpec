@@ -158,6 +158,8 @@ export async function initGauge(canvasId, config = {}) {
     host.classList.add(type === 'radial' ? 'gauge--radial' : 'gauge--linear');
     if (type === 'linear') host.classList.add('gauge-host--linear');
 
+    host.querySelectorAll('.gauge-value, .gauge-subunits').forEach(n => n.remove());
+
     // square based on host
     let s = Math.floor(Math.min(host.clientWidth, host.clientHeight));
     if (!s || s < 100) s = 280;
@@ -358,6 +360,15 @@ export function setStates(stateById) {
 }
 
 export function disposeGauge(canvasId) {
+    const el = _els.get(canvasId) || document.getElementById(canvasId);
+    const host = el ? (el.parentElement || el) : null;
+
+    if (host) {
+        host.querySelectorAll('.gauge-value, .gauge-subunits').forEach(n => n.remove());
+        host.classList.remove('gauge--radial', 'gauge--linear', 'gauge-host--linear',
+            'is-good', 'is-warn', 'is-bad');
+    }
+
     const ro = _resize.get(canvasId);
     try { ro?.disconnect?.(); } catch { }
     _resize.delete(canvasId);

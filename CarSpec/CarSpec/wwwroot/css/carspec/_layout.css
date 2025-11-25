@@ -18,6 +18,43 @@
     padding-bottom: calc(12px + env(safe-area-inset-bottom));
 }
 
+.nav-left {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px; /* space between logo and pill */
+}
+
+/* The profile pill now sits under the logo, so no right-margin */
+.nav-profile {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--cs-iron, #151820);
+    color: var(--cs-mist, #e4ecff);
+    border: 1px solid var(--card-border, rgba(255,255,255,0.14));
+    font-size: 12px;
+    margin-right: 0; /* was 10px — not needed anymore */
+    margin-top: 2px;
+    max-width: 260px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+.nav-profile-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.nav-profile--empty {
+    opacity: 0.65;
+    font-style: italic;
+}
+
 @media (max-width: 720px) {
     .cs-main {
         padding-bottom: 80px; /* space for bottom nav */
