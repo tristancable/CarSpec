@@ -1,15 +1,20 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+﻿using CarSpec.Constants;
+using CarSpec.Interfaces;
+using CarSpec.Models;
+using CarSpec.Services.Obd;
+using CarSpec.Services.Telemetry;
+using CarSpec.Utils;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
-using CarSpec.Models;
-using CarSpec.Services.Telemetry;
-using CarSpec.Services.Obd;
-using CarSpec.Interfaces;
-using CarSpec.Utils;
-using CarSpec.Constants;
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Threading.Tasks;
+using System.Timers;
 
 namespace CarSpec.Components.Pages.Dashboard
 {
@@ -259,6 +264,10 @@ namespace CarSpec.Components.Pages.Dashboard
         private bool _isReplaying;
         private bool _isReplayPaused;
         private double _replaySpeed = 1.0;
+        private long? _replayPositionMs;
+        private long? _replayDurationMs;
+        private System.Timers.Timer? _replayTimer;
+        private DateTime _replayStartUtc;
 
         private bool IsLive => ObdService.IsEcuConnected && !ObdService.SimulationMode;
         private bool ShouldRenderGauges => _isReplaying || (IsLive && _planKnown);
@@ -267,10 +276,38 @@ namespace CarSpec.Components.Pages.Dashboard
         private IJSObjectReference? gaugeModule;
         private bool gaugeReady;
 
+        private IJSObjectReference? downloadModule;
+
         private void RunSetup() => Nav.NavigateTo("/setup");
 
         private HashSet<string> _plan = new(StringComparer.OrdinalIgnoreCase);
         private bool _planKnown => _plan.Count > 0;
+
+        private string CurrentVehicleLabel =>
+            Profiles?.Current is null
+                ? ""
+                : $"{Profiles.Current.Year} {Profiles.Current.Make} {Profiles.Current.Model}".Trim();
+
+        private IReadOnlyList<RecordingMeta> FilteredReplays
+        {
+            get
+            {
+                if (_replays is null || _replays.Count == 0)
+                    return Array.Empty<RecordingMeta>();
+
+                var currentLabel = Profiles?.Current is VehicleProfile vp
+                    ? $"{vp.Year} {vp.Make} {vp.Model}"
+                    : null;
+
+                return _replays
+                    .Where(r =>
+                        string.IsNullOrWhiteSpace(currentLabel)
+                            ? true
+                            : string.Equals(r.Vehicle, currentLabel, StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(r => r.CreatedUtc)
+                    .ToList();
+            }
+        }
 
         /// <summary>
         /// Whether this metric is actually available in the current context
@@ -385,6 +422,8 @@ namespace CarSpec.Components.Pages.Dashboard
 
             ObdService.OnData += HandleLiveData;
 
+            ObdService.OnReplayCompleted += HandleReplayCompleted;
+
             Log("🚀 CarSpec Dashboard Successfully Started...");
 
             await RecomputeNeedsSetupAsync();
@@ -397,6 +436,16 @@ namespace CarSpec.Components.Pages.Dashboard
 
             if (!_needsSetup && ObdService.IsEcuConnected && !ObdService.SimulationMode)
                 await AttachLiveStreamAsync();
+        }
+
+        private void HandleReplayCompleted()
+        {
+            _isReplaying = false;
+            _isReplayPaused = false;
+            _replayTimer?.Stop();
+            _replayPositionMs = _replayDurationMs;
+            Log("⏹️ Replay finished.");
+            InvokeAsync(StateHasChanged);
         }
 
         private async Task RecomputeNeedsSetupAsync()
@@ -432,29 +481,36 @@ namespace CarSpec.Components.Pages.Dashboard
             }
         }
 
-        private void UpdateReplayAvailablePids(CarData? cd)
+        private bool UpdateReplayAvailablePids(CarData? cd)
         {
-            if (cd is null) return;
+            if (cd is null) return false;
+
+            bool changed = false;
 
             foreach (var kvp in _pidAccessors)
             {
                 var value = kvp.Value(cd);
                 if (value is null) continue;
 
-                switch (value)
+                bool hasValue = value switch
                 {
-                    case int i when i != 0:
-                    case long l when l != 0:
-                    case short s when s != 0:
-                    case byte b when b != 0:
-                    case float f when Math.Abs(f) > float.Epsilon:
-                    case double d when Math.Abs(d) > double.Epsilon:
-                        _replayAvailablePids.Add(kvp.Key);
-                        break;
-                    default:
-                        break;
+                    int i => i != 0,
+                    long l => l != 0,
+                    short s => s != 0,
+                    byte b => b != 0,
+                    float f => Math.Abs(f) > float.Epsilon,
+                    double d => Math.Abs(d) > double.Epsilon,
+                    _ => false
+                };
+
+                if (hasValue)
+                {
+                    if (_replayAvailablePids.Add(kvp.Key))
+                        changed = true;
                 }
             }
+
+            return changed;
         }
 
         private async void HandleLiveData(CarData cd)
@@ -464,15 +520,30 @@ namespace CarSpec.Components.Pages.Dashboard
                 try { await Recorder.AppendAsync(cd); } catch { }
             }
 
-            var newPlan = (ObdService.CurrentPollPlan ?? Array.Empty<string>())
-                          .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            bool planChanged = !_planKnown || !_plan.SetEquals(newPlan);
+            HashSet<string> newPlan = _plan;
+            bool planChanged = false;
+
+            if (!_isReplaying)
+            {
+                newPlan = (ObdService.CurrentPollPlan ?? Array.Empty<string>())
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                planChanged = !_planKnown || !_plan.SetEquals(newPlan);
+            }
 
             await InvokeAsync(async () =>
             {
-                carData = cd;
-
-                if (planChanged)
+                if (_isReplaying)
+                {
+                    var pidsChanged = UpdateReplayAvailablePids(cd);
+                    if (pidsChanged && _view == DisplayMode.Gauges)
+                    {
+                        gaugeReady = false;
+                        StateHasChanged();
+                        await Task.Yield();
+                        await EnsureGaugesInitializedAsync();
+                    }
+                }
+                else if (planChanged)
                 {
                     _plan = newPlan;
                     if (_view == DisplayMode.Gauges)
@@ -483,6 +554,8 @@ namespace CarSpec.Components.Pages.Dashboard
                         await EnsureGaugesInitializedAsync();
                     }
                 }
+
+                carData = cd;
 
                 await SafeSetAllGaugesAsync();
                 StateHasChanged();
@@ -559,12 +632,27 @@ namespace CarSpec.Components.Pages.Dashboard
             _isReplayPaused = false;
             StateHasChanged();
 
-            if (_isRecording) await StopRecording();
+            if (_isRecording)
+                await StopRecording();
+
             await ObdService.Disconnect();
             ObdService.SimulationMode = true;
 
             _isReplaying = true;
             _replayAvailablePids.Clear();
+
+            var profilePids = Profiles?.Current?.SupportedPidsCache;
+            if (profilePids is { Count: > 0 })
+            {
+                foreach (var pid in profilePids)
+                    _replayAvailablePids.Add(pid);
+            }
+            else
+            {
+                foreach (var pid in _pidAccessors.Keys)
+                    _replayAvailablePids.Add(pid);
+            }
+
             StateHasChanged();
 
             if (_view == DisplayMode.Gauges)
@@ -575,49 +663,50 @@ namespace CarSpec.Components.Pages.Dashboard
                 StateHasChanged();
                 await Task.Yield();
                 await EnsureGaugesInitializedAsync();
-                await Task.Delay(16);
             }
+
+            var meta = _replays.FirstOrDefault(r => r.Id == _selectedReplayId);
+            _replayDurationMs = meta?.DurationMs ?? 0;
+            _replayPositionMs = 0;
+
+            double speed = _replaySpeed <= 0 ? 1.0 : _replaySpeed;
+            _replayStartUtc = DateTime.UtcNow;
+
+            _replayTimer?.Dispose();
+            _replayTimer = new System.Timers.Timer(200);
+            _replayTimer.AutoReset = true;
+            _replayTimer.Elapsed += (_, __) =>
+            {
+                if (!_isReplaying || _isReplayPaused) return;
+
+                var elapsedRealMs = (DateTime.UtcNow - _replayStartUtc).TotalMilliseconds;
+                var scaled = elapsedRealMs * speed;
+                var pos = (long)scaled;
+
+                if (_replayDurationMs is long dur && pos > dur)
+                    pos = dur;
+
+                _replayPositionMs = pos;
+                _ = InvokeAsync(StateHasChanged);
+            };
+            _replayTimer.Start();
 
             _isPreparingReplay = false;
             StateHasChanged();
 
-            double speed = _replaySpeed <= 0 ? 1.0 : _replaySpeed;
             Log($"▶️ Starting replay {_selectedReplayId} at {speed:0.##}×");
-
-            await Replayer.StartAsync(
-                _selectedReplayId,
-                onFrame: async cd =>
-                {
-                    await InvokeAsync(async () =>
-                    {
-                        UpdateReplayAvailablePids(cd);
-                        carData = cd;
-                        await SafeSetAllGaugesAsync();
-                        StateHasChanged();
-                    });
-                },
-                onStop: () =>
-                {
-                    _isReplaying = false;
-                    _isReplayPaused = false;
-                    _ = InvokeAsync(async () =>
-                    {
-                        await DisposeGaugesAsync(all: true);
-                        gaugeReady = false;
-                        StateHasChanged();
-                    });
-                    Log("⏹️ Replay finished.");
-                },
-                speed: speed
-            );
+            await ObdService.StartReplayAsync(_selectedReplayId, speed);
         }
 
         private Task StopReplay()
         {
             if (!_isReplaying) return Task.CompletedTask;
-            Replayer.Stop();
+
+            ObdService.StopReplay();
             _isReplaying = false;
             _isReplayPaused = false;
+            _replayTimer?.Stop();
+            _replayPositionMs = 0;
             Log("⏹️ Replay stopped.");
             return Task.CompletedTask;
         }
@@ -628,6 +717,7 @@ namespace CarSpec.Components.Pages.Dashboard
 
             Replayer.Pause();
             _isReplayPaused = true;
+            _replayTimer?.Stop();
             Log("⏸ Replay paused.");
             StateHasChanged();
             return Task.CompletedTask;
@@ -639,9 +729,80 @@ namespace CarSpec.Components.Pages.Dashboard
 
             Replayer.Resume();
             _isReplayPaused = false;
+
+            var currentPos = _replayPositionMs ?? 0;
+            var speed = _replaySpeed <= 0 ? 1.0 : _replaySpeed;
+
+            _replayStartUtc = DateTime.UtcNow.AddMilliseconds(-(currentPos / speed));
+
+            _replayTimer?.Start();
             Log("▶ Replay resumed.");
             StateHasChanged();
             return Task.CompletedTask;
+        }
+
+        private async Task RewindReplay()
+        {
+            if (!_isReplaying) return;
+
+            var current = _replayPositionMs ?? 0;
+            var target = current - 5000;
+            if (target < 0) target = 0;
+
+            var speed = _replaySpeed <= 0 ? 1.0 : _replaySpeed;
+            _replayStartUtc = DateTime.UtcNow.AddMilliseconds(-(target / speed));
+            _replayPositionMs = target;
+
+            await Replayer.RewindAsync(5);
+        }
+
+        private async Task FastForwardReplay()
+        {
+            if (!_isReplaying) return;
+
+            var duration = _replays.FirstOrDefault(r => r.Id == _selectedReplayId)?.DurationMs ?? 0;
+            var current = _replayPositionMs ?? 0;
+            var target = current + 5000;
+            if (target > duration) target = duration;
+
+            var speed = _replaySpeed <= 0 ? 1.0 : _replaySpeed;
+            _replayStartUtc = DateTime.UtcNow.AddMilliseconds(-(target / speed));
+            _replayPositionMs = target;
+
+            await Replayer.FastForwardAsync(5, duration);
+        }
+
+        private async Task DeleteReplayAsync(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return;
+
+            if (_isReplaying && _selectedReplayId == id)
+            {
+                ObdService.StopReplay();
+                _isReplaying = false;
+                _isReplayPaused = false;
+            }
+
+            try
+            {
+                await Recorder.DeleteAsync(id);
+
+                _replays = await Recorder.ListAsync();
+
+                if (_selectedReplayId == id)
+                {
+                    _selectedReplayId = _replays.LastOrDefault()?.Id ?? "";
+                }
+
+                Log($"🗑 Recording '{id}' deleted.");
+            }
+            catch (Exception ex)
+            {
+                Log($"❌ Failed to delete recording: {ex.Message}");
+            }
+
+            await InvokeAsync(StateHasChanged);
         }
 
         private async Task EnsureGaugesInitializedAsync()
@@ -875,6 +1036,12 @@ namespace CarSpec.Components.Pages.Dashboard
             }
 
             var key = ProfileKey(Profiles?.Current);
+            if (key != _lastProfileKey)
+            {
+                _lastProfileKey = key;
+                _selectedReplayId = "";
+            }
+
             if (key != _lastProfileKey && gaugeReady)
             {
                 _lastProfileKey = key;
@@ -949,6 +1116,24 @@ namespace CarSpec.Components.Pages.Dashboard
         private static string FuelClass(double? f) => f is null ? "" : (f <= 10 ? "bad" : f <= 25 ? "warn" : "good");
         private static string TempClass(double? f) => f is null ? "" : (f >= 230 ? "bad" : f >= 215 ? "warn" : "good");
         private static string IatClass(double? f) => f is null ? "" : (f >= 150 ? "bad" : f >= 120 ? "warn" : "good");
+        private static string LoadClass(double? p)
+        {
+            if (p is null) return "";
+            return p >= 90 ? "bad" : p >= 70 ? "warn" : "good";
+        }
+
+        private static string MapClass(double? kpa)
+        {
+            if (kpa is null) return "";
+            return kpa >= 180 ? "bad" : kpa >= 130 ? "warn" : "good";
+        }
+
+        private static string TimingClass(double? deg)
+        {
+            if (deg is null) return "";
+            return deg <= -10 ? "bad" : deg <= -2 ? "warn" : "good";
+        }
+
 
         private async Task SwitchToLive()
         {
@@ -1132,10 +1317,20 @@ namespace CarSpec.Components.Pages.Dashboard
                 await gaugeModule.DisposeAsync();
             }
 
+            if (downloadModule is not null)
+            {
+                try { await downloadModule.DisposeAsync(); } catch { }
+            }
+
+            _replayTimer?.Stop();
+            _replayTimer?.Dispose();
+
             ObdService.OnLog -= HandleLog;
             ObdService.OnData -= HandleLiveData;
             if (_fpHandler is not null) ObdService.OnFingerprint -= _fpHandler;
             if (_stateHandler is not null) ObdService.OnStateChanged -= _stateHandler;
+
+            ObdService.OnReplayCompleted -= HandleReplayCompleted;
 
             Replayer.Stop();
             if (_isRecording) try { await Recorder.StopAsync(); } catch { }
@@ -1205,5 +1400,140 @@ namespace CarSpec.Components.Pages.Dashboard
             var ts = TimeSpan.FromMilliseconds(ms.Value);
             return $"{(int)ts.TotalMinutes:00}:{ts.Seconds:00}";
         }
+
+        private async Task ExportSelectedRecordingAsync(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                Log("⚠️ No recording selected to export.");
+                return;
+            }
+
+            _selectedReplayId = id;
+
+            var text = await Recorder.DumpRecordingAsync(id);
+            if (text is null)
+            {
+                Log($"❌ No payload found for recording '{id}'.");
+                return;
+            }
+
+            var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            if (lines.Length <= 1)
+            {
+                Log($"❌ Recording '{id}' has no data frames.");
+                return;
+            }
+
+            var frames = new List<CarRecordingFrame>();
+            for (int i = 1; i < lines.Length; i++)
+            {
+                try
+                {
+                    var frame = JsonSerializer.Deserialize<CarRecordingFrame>(lines[i], RecJsonOpts);
+                    if (frame is not null)
+                        frames.Add(frame);
+                }
+                catch
+                {
+                    // ignore bad lines
+                }
+            }
+
+            if (frames.Count == 0)
+            {
+                Log($"❌ Could not parse any frames for recording '{id}'.");
+                return;
+            }
+
+            static bool HasNumericValue(object? v) => v switch
+            {
+                null => false,
+                int i => i != 0,
+                long l => l != 0,
+                short s => s != 0,
+                byte b => b != 0,
+                float f => Math.Abs(f) > float.Epsilon,
+                double d => Math.Abs(d) > double.Epsilon,
+                decimal m => m != 0m,
+                _ => false
+            };
+
+            bool rpmHasData = frames.Any(f => HasNumericValue(f.data?.RPM));
+            bool speedHasData = frames.Any(f => HasNumericValue(f.data?.Speed));
+            bool tpsHasData = frames.Any(f => HasNumericValue(f.data?.ThrottlePercent));
+            bool fuelHasData = frames.Any(f => HasNumericValue(f.data?.FuelLevelPercent));
+            bool coolantHasData = frames.Any(f => HasNumericValue(f.data?.CoolantTempF));
+            bool oilHasData = frames.Any(f => HasNumericValue(f.data?.OilTempF));
+            bool iatHasData = frames.Any(f => HasNumericValue(f.data?.IntakeTempF));
+            bool loadHasData = frames.Any(f => HasNumericValue(f.data?.EngineLoadPercent));
+            bool mapHasData = frames.Any(f => HasNumericValue(f.data?.MapKpa));
+            bool mafHasData = frames.Any(f => HasNumericValue(f.data?.MafGramsPerSec));
+
+            string C(object? v) =>
+                v switch
+                {
+                    null => "",
+                    IFormattable fmt => fmt.ToString(null, CultureInfo.InvariantCulture),
+                    _ => v.ToString() ?? ""
+                };
+
+            var sb = new StringBuilder();
+
+            var headers = new List<string> { "time_ms" };
+            if (rpmHasData) headers.Add("rpm");
+            if (speedHasData) headers.Add("speed_mph");
+            if (tpsHasData) headers.Add("throttle_pct");
+            if (fuelHasData) headers.Add("fuel_pct");
+            if (coolantHasData) headers.Add("coolant_f");
+            if (oilHasData) headers.Add("oil_f");
+            if (iatHasData) headers.Add("iat_f");
+            if (loadHasData) headers.Add("load_pct");
+            if (mapHasData) headers.Add("map_kpa");
+            if (mafHasData) headers.Add("maf_gps");
+
+            sb.AppendLine(string.Join(',', headers));
+
+            foreach (var f in frames)
+            {
+                var d = f.data ?? new CarData();
+                var row = new List<string> { C(f.t) };
+
+                if (rpmHasData) row.Add(C(d.RPM));
+                if (speedHasData) row.Add(C(d.Speed));
+                if (tpsHasData) row.Add(C(d.ThrottlePercent));
+                if (fuelHasData) row.Add(C(d.FuelLevelPercent));
+                if (coolantHasData) row.Add(C(d.CoolantTempF));
+                if (oilHasData) row.Add(C(d.OilTempF));
+                if (iatHasData) row.Add(C(d.IntakeTempF));
+                if (loadHasData) row.Add(C(d.EngineLoadPercent));
+                if (mapHasData) row.Add(C(d.MapKpa));
+                if (mafHasData) row.Add(C(d.MafGramsPerSec));
+
+                sb.AppendLine(string.Join(',', row));
+            }
+
+            var bytes = Encoding.UTF8.GetBytes(sb.ToString());
+            var base64 = Convert.ToBase64String(bytes);
+            var filename = $"carspec-recording-{id}.csv";
+
+            downloadModule ??= await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./js/carspec.downloads.js");
+
+            await downloadModule.InvokeVoidAsync(
+                "downloadBytes",
+                filename,
+                "text/csv;charset=utf-8",
+                base64
+            );
+
+            Log($"⬇️ Exported recording '{id}' as CSV.");
+        }
+
+        private static readonly JsonSerializerOptions RecJsonOpts = new(JsonSerializerDefaults.Web)
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            PropertyNameCaseInsensitive = true
+        };
     }
 }

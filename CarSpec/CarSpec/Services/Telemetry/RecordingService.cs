@@ -16,9 +16,13 @@ namespace CarSpec.Services.Telemetry
         private long _lastT;
         private int _frames;
 
+        private CarData? _lastSnap;
+        private long _lastFrameT;
+        private const int FrameIntervalMs = 200;
+
         public bool IsRecording => _buffer != null;
-        private const string IndexKey = "rec.index";               // List<RecordingMeta>
-        private static string DataKey(string id) => $"rec.gz:{id}";// byte[] (gzip NDJSON)
+        private const string IndexKey = "rec.index";
+        private static string DataKey(string id) => $"rec.gz:{id}";
 
         private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web)
         {
@@ -35,6 +39,8 @@ namespace CarSpec.Services.Telemetry
             _buffer = new StringBuilder(capacity: 32 * 1024);
             _frames = 0;
             _lastT = 0;
+            _lastFrameT = 0;
+            _lastSnap = null;
             _t0 = NowMs();
 
             _meta = new RecordingMeta
@@ -65,27 +71,36 @@ namespace CarSpec.Services.Telemetry
         {
             if (!IsRecording || _buffer is null) return Task.CompletedTask;
 
-            var t = NowMs() - _t0;
-            _lastT = t;
+            var nowT = NowMs() - _t0;
 
-            var frame = new
+            if (_lastSnap is not null && _lastFrameT > 0)
             {
-                t,
-                rpm = snap.RPM,
-                spd = snap.Speed,
-                thr = snap.ThrottlePercent,
-                ct = snap.CoolantTempF,
-                iat = snap.IntakeTempF,
-                load = snap.EngineLoadPercent,
-                maf = snap.MafGramsPerSec,
-                map = snap.MapKpa,
-                baro = snap.BaroKPa,
-                fuel = snap.FuelLevelPercent
+                while (_lastFrameT + FrameIntervalMs <= nowT)
+                {
+                    _lastFrameT += FrameIntervalMs;
+                    AppendFrame(_lastFrameT, _lastSnap);
+                }
+            }
+
+            _lastT = nowT;
+            _lastFrameT = nowT;
+            _lastSnap = snap.Clone();
+
+            AppendFrame(nowT, snap);
+
+            return Task.CompletedTask;
+        }
+
+        private void AppendFrame(long t, CarData snap)
+        {
+            var frame = new CarRecordingFrame
+            {
+                t = t,
+                data = snap.Clone()
             };
 
-            _buffer.AppendLine(JsonSerializer.Serialize(frame, JsonOpts));
+            _buffer!.AppendLine(JsonSerializer.Serialize(frame, JsonOpts));
             _frames++;
-            return Task.CompletedTask;
         }
 
         public async Task<RecordingMeta?> StopAsync(bool gzip = true)
@@ -93,9 +108,8 @@ namespace CarSpec.Services.Telemetry
             if (!IsRecording || _buffer is null || _meta is null) return _meta;
 
             _meta.Frames = _frames;
-            _meta.DurationMs = _lastT;
+            _meta.DurationMs = _lastFrameT;
 
-            // gzip payload
             var utf8 = Encoding.UTF8.GetBytes(_buffer.ToString());
             byte[] payload;
             if (gzip)
@@ -104,7 +118,7 @@ namespace CarSpec.Services.Telemetry
                 using (var gz = new GZipStream(ms, CompressionLevel.SmallestSize, leaveOpen: true))
                 {
                     gz.Write(utf8, 0, utf8.Length);
-                    gz.Flush(); // now inside the using scope
+                    gz.Flush();
                 }
                 payload = ms.ToArray();
             }
@@ -115,17 +129,13 @@ namespace CarSpec.Services.Telemetry
 
             _meta.ByteSize = payload.LongLength;
 
-            // persist data blob
             await _storage.SetAsync(DataKey(_meta.Id), payload);
 
-            // update index
             var idx = await _storage.GetAsync<List<RecordingMeta>>(IndexKey) ?? new List<RecordingMeta>();
-            // replace if same Id exists
             var i = idx.FindIndex(x => x.Id == _meta.Id);
             if (i >= 0) idx[i] = _meta; else idx.Add(_meta);
             await _storage.SetAsync(IndexKey, idx);
 
-            // clear in-memory
             _buffer = null;
             var done = _meta;
             _meta = null;
@@ -134,23 +144,37 @@ namespace CarSpec.Services.Telemetry
 
         public async Task<string?> DumpRecordingAsync(string id)
         {
-            // Get the stored payload for this recording
             var blob = await _storage.GetAsync<byte[]>(DataKey(id));
             if (blob is null || blob.Length == 0)
                 return null;
 
             try
             {
-                // Try to treat it as GZIP
                 using var src = new MemoryStream(blob);
                 using var gz = new GZipStream(src, CompressionMode.Decompress);
                 using var reader = new StreamReader(gz, Encoding.UTF8);
-                return await reader.ReadToEndAsync(); // header + frames (one JSON per line)
+                return await reader.ReadToEndAsync();
             }
             catch
             {
-                // If it's not gzipped (e.g. gzip=false), just interpret as UTF-8 text
                 return Encoding.UTF8.GetString(blob);
+            }
+        }
+
+        public async Task DeleteAsync(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id)) return;
+
+            await _storage.RemoveAsync(DataKey(id));
+
+            var idx = await _storage.GetAsync<List<RecordingMeta>>(IndexKey)
+                      ?? new List<RecordingMeta>();
+
+            var removed = idx.RemoveAll(r => string.Equals(r.Id, id, StringComparison.Ordinal));
+
+            if (removed > 0)
+            {
+                await _storage.SetAsync(IndexKey, idx);
             }
         }
 

@@ -24,12 +24,13 @@
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">24.0</SupportedOSPlatformVersion>
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.19041.0</SupportedOSPlatformVersion>
 		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
+		<PackageIcon>logo.png</PackageIcon>
 	</PropertyGroup>
 
 	<ItemGroup>
 		<!-- App Icon & Splash -->
-		<MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#512BD4" />
-		<MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" BaseSize="128,128" />
+		<MauiIcon Include="Resources\AppIcon\appicon.png" />
+		<MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" />
 
 		<!-- Assets -->
 		<MauiImage Include="Resources\Images\*" />
@@ -55,6 +56,18 @@
 	<ItemGroup>
 		<Capabilities Include="bluetooth" />
 		<Capabilities Include="bluetooth.genericAttributeProfile" />
+	</ItemGroup>
+	<ItemGroup>
+	  <None Include="wwwroot\images\logo.png">
+	    <Pack>True</Pack>
+	    <PackagePath>\</PackagePath>
+	  </None>
+	</ItemGroup>
+	<ItemGroup>
+	  <None Update="Resources\AppIcon\appicon.png">
+	    <PackagePath>\</PackagePath>
+	    <Pack>True</Pack>
+	  </None>
 	</ItemGroup>
 
 </Project>

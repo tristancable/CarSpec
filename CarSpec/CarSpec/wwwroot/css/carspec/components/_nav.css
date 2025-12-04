@@ -54,10 +54,9 @@
             text-decoration: none;
         }
 
-    /* regular .cs-btn inside nav (used for theme toggle) */
     .cs-nav .cs-btn:not(.primary) {
         color: var(--nav-link);
-        background: var(--btn-bg);
+/*        background: var(--btn-bg);*/
         border-color: var(--btn-border);
     }
 
@@ -66,6 +65,12 @@
             border-color: var(--btn-hover-border);
             box-shadow: 0 0 0 1px var(--btn-hover-border);
         }
+
+    .cs-nav .nav-links .nav-link-btn.active {
+        border: 1px solid var(--nav-link);
+        color: var(--nav-link);
+        box-shadow: 0 0 0 1px var(--nav-link-glow);
+    }
 
 /* --- layout helpers for MainLayout nav --- */
 
@@ -168,7 +173,6 @@ html[data-theme="light"] .cs-bottom-nav {
 
 /* ---------- Responsive nav behaviour ---------- */
 
-/* phones & small tablets: hide text links, show bottom bar */
 @media (max-width: 720px) {
     .cs-nav {
         gap: 10px;

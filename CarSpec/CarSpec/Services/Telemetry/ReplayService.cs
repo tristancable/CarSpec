@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 
 namespace CarSpec.Services.Telemetry
 {
@@ -12,26 +13,38 @@ namespace CarSpec.Services.Telemetry
         private readonly IAppStorage _storage;
         private CancellationTokenSource? _cts;
 
-        // Pause state
         private volatile bool _paused;
         private long _pauseStartedMs;
         private long _totalPausedMs;
         private double _speed = 1.0;
+        private volatile bool _suppressOnStop;
+
+        private string? _currentId;
+        private Func<CarData, Task>? _currentOnFrame;
+        private Action? _currentOnStop;
+        private long _currentT;
+        private int _replayGeneration;
 
         public bool IsReplaying => _cts != null;
         public bool IsPaused => _paused;
 
         public ReplayService(IAppStorage storage) => _storage = storage;
 
-        public async Task StartAsync(string id, Func<CarData, Task> onFrame, Action? onStop = null, double speed = 1.0)
+        public async Task StartAsync(string id, Func<CarData, Task> onFrame, Action? onStop = null, double speed = 1.0, long startOffsetMs = 0)
         {
-            // kill any existing replay
             Stop();
+
+            var myGeneration = Interlocked.Increment(ref _replayGeneration);
 
             _speed = speed <= 0 ? 1.0 : speed;
             _paused = false;
             _pauseStartedMs = 0;
             _totalPausedMs = 0;
+
+            _currentId = id;
+            _currentOnFrame = onFrame;
+            _currentOnStop = onStop;
+            _currentT = 0;
 
             var blob = await _storage.GetAsync<byte[]>($"rec.gz:{id}");
             if (blob is null)
@@ -55,20 +68,21 @@ namespace CarSpec.Services.Telemetry
                     }
                     catch
                     {
-                        // Not gzipped – treat as raw
                         s = new MemoryStream(blob);
                     }
 
                     using var r = new StreamReader(s, Encoding.UTF8);
 
-                    // header line (ignored)
                     _ = await r.ReadLineAsync();
 
                     long startRealMs = -1;
+                    bool skipping = startOffsetMs > 0;
 
                     while (!ct.IsCancellationRequested)
                     {
-                        // Handle pause: freeze time until resumed
+                        if (myGeneration != _replayGeneration)
+                            break;
+
                         if (_paused)
                         {
                             if (_pauseStartedMs == 0)
@@ -92,62 +106,162 @@ namespace CarSpec.Services.Telemetry
                         var line = await r.ReadLineAsync();
                         if (line == null)
                         {
-                            // EOF → finished replay
                             break;
                         }
 
-                        if (line.Length == 0 || line[0] != '{')
+                        if (string.IsNullOrWhiteSpace(line) || line[0] != '{')
                             continue;
 
-                        using var doc = JsonDocument.Parse(line);
-                        var root = doc.RootElement;
-
-                        if (!root.TryGetProperty("t", out var tProp))
-                            continue;
-
-                        var t = tProp.GetInt64(); // ms since start of recording
-
-                        if (startRealMs < 0)
-                            startRealMs = NowMs();
-
-                        // "Active" playback time = real time - start - paused segments
-                        var elapsedActive = NowMs() - startRealMs - _totalPausedMs;
-                        var targetMs = (long)(t / _speed);
-
-                        if (targetMs > elapsedActive)
+                        JsonDocument doc;
+                        try
                         {
-                            var delayMs = (int)Math.Min(500, targetMs - elapsedActive);
-                            try { await Task.Delay(delayMs, ct); } catch { }
-                            if (ct.IsCancellationRequested) break;
+                            doc = JsonDocument.Parse(line);
+                        }
+                        catch
+                        {
+                            continue;
                         }
 
-                        var cd = new CarData
+                        using (doc)
                         {
-                            RPM = ReadInt(root, "rpm"),
-                            Speed = ReadDouble(root, "spd"),
-                            ThrottlePercent = ReadDouble(root, "thr"),
-                            CoolantTempF = ReadDouble(root, "ct"),
-                            IntakeTempF = ReadDouble(root, "iat"),
-                            EngineLoadPercent = ReadDouble(root, "load"),
-                            MafGramsPerSec = ReadDouble(root, "maf"),
-                            MapKpa = ReadDouble(root, "map"),
-                            BaroKPa = ReadInt(root, "baro"),
-                            FuelLevelPercent = ReadDouble(root, "fuel"),
-                            LastUpdated = DateTime.Now
-                        };
+                            var root = doc.RootElement;
 
-                        await onFrame(cd);
+                            if (!root.TryGetProperty("t", out var tProp) ||
+                                !root.TryGetProperty("data", out var dataProp) ||
+                                tProp.ValueKind != JsonValueKind.Number ||
+                                dataProp.ValueKind != JsonValueKind.Object)
+                            {
+                                continue;
+                            }
+
+                            var t = tProp.GetInt64();
+                            var data = dataProp;
+
+                            if (skipping)
+                            {
+                                if (t < startOffsetMs)
+                                    continue;
+
+                                skipping = false;
+                                startRealMs = NowMs() - (long)(t / _speed);
+                            }
+
+                            if (startRealMs < 0)
+                                startRealMs = NowMs();
+
+                            var elapsedActive = NowMs() - startRealMs - _totalPausedMs;
+                            var targetMs = (long)(t / _speed);
+
+                            if (targetMs > elapsedActive)
+                            {
+                                var delayMs = (int)Math.Min(500, targetMs - elapsedActive);
+                                try { await Task.Delay(delayMs, ct); } catch { }
+                                if (ct.IsCancellationRequested) break;
+                            }
+
+                            var cd = new CarData
+                            {
+                                Speed = ReadDouble(data, "speed"),
+                                RPM = ReadDouble(data, "rpm"),
+                                ThrottlePercent = ReadDouble(data, "throttlePercent"),
+                                FuelLevelPercent = ReadDouble(data, "fuelLevelPercent"),
+                                OilTempF = ReadDouble(data, "oilTempF"),
+                                CoolantTempF = ReadDouble(data, "coolantTempF"),
+                                IntakeTempF = ReadDouble(data, "intakeTempF"),
+                                EngineLoadPercent = ReadDouble(data, "engineLoadPercent"),
+                                MapKpa = ReadDouble(data, "mapKpa"),
+                                // MapPsi is in the JSON too, but only needed if you use it:
+                                // MapPsi               = ReadDouble(data, "mapPsi"),
+                                TimingAdvanceDeg = ReadDouble(data, "timingAdvanceDeg"),
+                                MafGramsPerSec = ReadDouble(data, "mafGramsPerSec"),
+                                DistanceWithMilKm = ReadInt(data, "distanceWithMilKm"),
+                                DistanceSinceClearKm = ReadInt(data, "distanceSinceClearKm"),
+                                WarmUpsSinceClear = ReadInt(data, "warmUpsSinceClear"),
+                                FuelRailPressureRelKPa = ReadDouble(data, "fuelRailPressureRelKPa"),
+                                FuelRailGaugePressureKPa = ReadInt(data, "fuelRailGaugePressureKPa"),
+                                CommandedEgrPercent = ReadDouble(data, "commandedEgrPercent"),
+                                EgrErrorPercent = ReadDouble(data, "egrErrorPercent"),
+                                CommandedEvapPurgePercent = ReadDouble(data, "commandedEvapPurgePercent"),
+                                EvapVaporPressurePa = ReadInt(data, "evapVaporPressurePa"),
+                                BaroKPa = ReadInt(data, "baroKPa"),
+                                LastUpdated = DateTime.Now
+                            };
+
+                            _currentT = t;
+
+                            if (myGeneration != _replayGeneration)
+                                break;
+
+                            await onFrame(cd);
+                        }
                     }
                 }
                 catch
                 {
-                    // swallow to keep UI resilient
+                    // ignore
                 }
                 finally
                 {
-                    onStop?.Invoke();
+                    var suppress = _suppressOnStop;
+                    _suppressOnStop = false;
+
+                    _cts = null;
+                    _paused = false;
+                    _pauseStartedMs = 0;
+                    _totalPausedMs = 0;
+
+                    if (!suppress)
+                    {
+                        onStop?.Invoke();
+                    }
                 }
             }, ct);
+        }
+
+        public async Task RewindAsync(int seconds)
+        {
+            if (_currentId is null || _currentOnFrame is null)
+                return;
+
+            var delta = Math.Max(1, seconds);
+            long target = _currentT - delta * 1000L;
+            if (target < 0) target = 0;
+
+            var wasPaused = _paused;
+
+            StopInternal(suppressCallback: true);
+
+            await StartAsync(_currentId, _currentOnFrame, _currentOnStop, _speed, target);
+
+            if (wasPaused)
+            {
+                await Task.Delay(80);
+                Pause();
+            }
+        }
+
+        public async Task FastForwardAsync(int seconds, long? durationMs = null)
+        {
+            if (_currentId is null || _currentOnFrame is null)
+                return;
+
+            var delta = Math.Max(1, seconds);
+            long target = _currentT + delta * 1000L;
+
+            if (durationMs is { } dur && target > dur)
+                target = dur;
+
+            var wasPaused = _paused;
+
+            StopInternal(suppressCallback: true);
+
+            await StartAsync(_currentId, _currentOnFrame, _currentOnStop, _speed, target);
+
+            if (wasPaused)
+            {
+                await Task.Delay(80);
+                Pause();
+            }
         }
 
         public void Pause()
@@ -162,13 +276,22 @@ namespace CarSpec.Services.Telemetry
             _paused = false;
         }
 
-        public void Stop()
+        private void StopInternal(bool suppressCallback)
         {
+            if (suppressCallback)
+                _suppressOnStop = true;
+
             try { _cts?.Cancel(); } catch { }
+
             _cts = null;
             _paused = false;
             _pauseStartedMs = 0;
             _totalPausedMs = 0;
+        }
+
+        public void Stop()
+        {
+            StopInternal(suppressCallback: false);
         }
 
         private static long NowMs() =>

@@ -31,6 +31,11 @@
         public int BaroKPa { get; set; }
         public DateTime LastUpdated { get; set; } = DateTime.Now;
 
+        public CarData Clone()
+        {
+            return (CarData)this.MemberwiseClone();
+        }
+
         public static CarData Simulated() => new CarData
         {
             Speed = new Random().Next(0, 121),

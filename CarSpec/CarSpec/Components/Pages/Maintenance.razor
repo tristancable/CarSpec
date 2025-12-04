@@ -123,7 +123,7 @@
         </div>
     }
 
-    @* Inline Add/Edit panel *@
+    <!-- Add/Edit -->
     @if (_editingItem is not null)
     {
         <section class="cs-card full" style="margin-top:16px">
@@ -195,7 +195,6 @@
     private List<MaintenanceItem> Upcoming = new();
     private List<MaintenanceItem> History = new();
 
-    // In a real implementation, pull from OBD if connected:
     private int? _currentOdometer = null;
 
     private MaintenanceItem? _editingItem;
@@ -218,7 +217,6 @@
 
         var all = await MaintenanceService.GetForVehicleAsync(Profiles.Current.Id);
 
-        // Uses VehicleProfile.OdometerMiles (make sure you added that property)
         _currentOdometer = Profiles.Current.OdometerMiles;
 
         var now = DateTime.UtcNow.Date;
@@ -264,7 +262,6 @@
 
     private string GetStatusClass(MaintenanceItem item)
     {
-        // Use miles or date, whichever is more urgent
         var milesLeft = item.MilesRemaining(_currentOdometer);
         var daysLeft = item.NextDueDate.HasValue
             ? (item.NextDueDate.Value.Date - DateTime.UtcNow.Date).TotalDays
@@ -312,7 +309,6 @@
 
     private void Edit(MaintenanceItem item)
     {
-        // Make a copy so editing doesn’t mutate the list until saved
         _editingItem = new MaintenanceItem
         {
             Id = item.Id,
@@ -335,7 +331,6 @@
         if (_editingItem is null || Profiles?.Current is null)
             return;
 
-        // Ensure it’s tied to the active vehicle
         _editingItem.VehicleProfileId = Profiles.Current.Id;
 
         await MaintenanceService.SaveAsync(_editingItem);

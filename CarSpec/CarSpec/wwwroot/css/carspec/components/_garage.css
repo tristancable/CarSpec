@@ -1,4 +1,8 @@
-﻿.cs-linkbtn {
+﻿.value .cs-input {
+    height: 27px;
+}
+
+.cs-linkbtn {
     background: none;
     border: none;
     padding: 0;
@@ -13,7 +17,6 @@
         text-decoration: underline;
     }
 
-/* ---- PID Modal ---- */
 .cs-modal-backdrop {
     position: fixed;
     inset: 0;
@@ -85,7 +88,6 @@
     padding-right: 6px;
 }
 
-/* responsive grid of PID chips */
 .pid-grid {
     display: grid;
     gap: 10px;
@@ -125,13 +127,11 @@
     word-wrap: break-word;
 }
 
-/* tag for unknown names */
 .pid-unknown .pid-name {
     color: #8b95b3;
     opacity: .75;
 }
 
-/* footer row */
 .cs-modal__foot {
     display: flex;
     justify-content: flex-end;

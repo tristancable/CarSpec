@@ -13,7 +13,7 @@
                           IsPreparingReplay="@_isPreparingReplay"
                           IsReplayPaused="@_isReplayPaused"
                           SelectedReplayId="@_selectedReplayId"
-                          Replays="@_replays"
+                          Replays="@FilteredReplays"
                           ReplaySpeed="@_replaySpeed"
                           DisableRecord="@(!ObdService.IsEcuConnected || ObdService.SimulationMode)"
                           DisableReplay="@(!ObdService.SimulationMode && ObdService.IsEcuConnected)"
@@ -24,7 +24,13 @@
                           PauseReplay="PauseReplay"
                           ResumeReplay="ResumeReplay"
                           ReplaySelectionChanged="OnReplaySelectionChanged"
-                          ReplaySpeedChanged="OnReplaySpeedChanged" />
+                          ReplaySpeedChanged="OnReplaySpeedChanged"
+                          OnRewind="RewindReplay"
+                          OnFastForward="FastForwardReplay"
+                          DeleteReplay="DeleteReplayAsync"
+                          ExportReplay="ExportSelectedRecordingAsync"
+                          ReplayPositionMs="_replayPositionMs"
+                          ReplayDurationMs="_replayDurationMs" />
 
         @* <button class="cs-btn btn-secondary cs-btn--sm cs-debug-btn"
                 type="button"
@@ -345,7 +351,27 @@
                 {
                     <section class="cs-card cs-metric">
                         <h3>Engine Load</h3>
-                        <div class="metric"><span class="value">@FormatInt(carData?.EngineLoadPercent)</span><span class="unit">%</span></div>
+                        <div class="metric @LoadClass(carData?.EngineLoadPercent)">
+                            <span class="value">@FormatInt(carData?.EngineLoadPercent)</span><span class="unit">%</span>
+                        </div>
+                    </section>
+                }
+                @if (CanShow(PID_MAP))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>MAP</h3>
+                        <div class="metric @MapClass(carData?.MapKpa)">
+                            <span class="value">@FormatInt(carData?.MapKpa)</span><span class="unit">kPa</span>
+                        </div>
+                    </section>
+                }
+                @if (CanShow(PID_TADV))
+                {
+                    <section class="cs-card cs-metric">
+                        <h3>Timing</h3>
+                        <div class="metric @TimingClass(carData?.TimingAdvanceDeg)">
+                            <span class="value">@FormatInt(carData?.TimingAdvanceDeg)</span><span class="unit">°</span>
+                        </div>
                     </section>
                 }
                 @if (CanShow(PID_FPRESS))
@@ -353,20 +379,6 @@
                     <section class="cs-card cs-metric">
                         <h3>Fuel Pressure</h3>
                         <div class="metric"><span class="value">@FormatInt(carData?.FuelPressureKpa)</span><span class="unit">kPa</span></div>
-                    </section>
-                }
-                @if (CanShow(PID_MAP))
-                {
-                    <section class="cs-card cs-metric">
-                        <h3>MAP</h3>
-                        <div class="metric"><span class="value">@FormatInt(carData?.MapKpa)</span><span class="unit">kPa</span></div>
-                    </section>
-                }
-                @if (CanShow(PID_TADV))
-                {
-                    <section class="cs-card cs-metric">
-                        <h3>Timing</h3>
-                        <div class="metric"><span class="value">@FormatInt(carData?.TimingAdvanceDeg)</span><span class="unit">°</span></div>
                     </section>
                 }
                 @if (CanShow(PID_MAF))

@@ -1,10 +1,9 @@
-﻿/* header row still a flex row */
-.header-bar {
+﻿.header-bar {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    flex-wrap: wrap; /* keeps things from smashing together on smaller widths */
+    flex-wrap: wrap;
 }
 
 .header-left {
@@ -18,29 +17,23 @@
     margin-left: auto;
     display: flex;
     align-items: center;
-/*    gap: 8px;*/
     flex-wrap: wrap;
 }
 
-/* Make the Basic / Enthusiast / Custom pills a bit tighter so text doesn’t overlap */
 .cs-seg--layout .seg {
     font-size: 12px;
     padding: 4px 10px;
-    white-space: nowrap; /* keep each word on one line inside its pill */
+    white-space: nowrap;
 }
 
-/* keep the two segmented groups in header-right from sticking together */
 .header-right .cs-seg-icons + .cs-seg-icons {
-    margin-left: 12px; /* space between view toggle and layout toggle */
+    margin-left: 12px;
 }
 
-/* make sure the first layout button doesn't inherit the negative margin
-   from the generic segmented-control styles */
 .cs-seg--layout .seg:first-child {
     margin-left: 0 !important;
 }
 
-/* keep it in the top-right on desktop */
 .container {
     position: relative;
 }
@@ -52,7 +45,6 @@
     z-index: 1;
 }
 
-/* tiny icon buttons */
 .cs-iconbtn {
     display: inline-flex;
     align-items: center;
@@ -80,7 +72,6 @@
     align-self: flex-start;
 }
 
-/* shrink inputs/badge padding */
 .cs-input--sm {
     height: 32px;
     padding: 2px 8px;
@@ -96,8 +87,6 @@
     width: 72px;
     min-width: 72px;
 }
-
-/* --- Rec / Replay toolbar layout --- */
 
 .toolbar-row {
     display: flex;
@@ -122,9 +111,10 @@
 
 .rec-bottom-row {
     display: flex;
-    justify-content: center; /* center under select/speed row */
+    justify-content: center;
     width: 100%;
     margin: 4px;
+    transform: translateY(-26px);
 }
 
 .rec-transport {
@@ -141,19 +131,22 @@
     padding: 0;
 }
 
-/* ---------- Responsive tweaks ---------- */
-
-/* tablet and down */
 @media (max-width: 1050px) {
     .recplay-float {
-        position: static; /* no absolute positioning */
         margin-top: 8px;
         display: flex;
-        justify-content: center; /* center whole toolbar */
+        justify-content: center;
     }
 
     .header-bar {
         margin-top: 12px;
+    }
+
+    .header-right {
+        margin-left: inherit;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
     }
 
     .rec-toolbar {
@@ -161,9 +154,17 @@
     }
 }
 
-/* phone-ish width */
 @media (max-width: 720px) {
-    /* slightly smaller title */
+    .toolbar-row {
+        justify-content: flex-start;
+    }
+
+    .recplay-float {
+        position: static;
+        display: flex;
+        justify-content: flex-start
+    }
+
     .cs-title {
         font-size: 20px !important;
         margin-bottom: 8px;
@@ -175,9 +176,15 @@
         gap: 10px;
     }
 
+    .header-right {
+        margin-left: inherit;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
     .header-left {
         width: 100%;
-        justify-content: space-between;
     }
 
     .rec-top-row {
@@ -185,27 +192,23 @@
         justify-content: center;
     }
 
-    /* if your gauges grid uses .cs-grid, this makes it 1 column on phones */
     .cs-grid {
         grid-template-columns: minmax(0, 1fr);
     }
 }
 
-/* ---------- Layout toggle pills (Basic / Enthusiast / Custom) ---------- */
-
 .cs-seg--layout {
     display: inline-flex;
 }
 
-    /* force perfect centering inside each pill */
     .cs-seg--layout .seg {
-        display: inline-flex; /* override any global button display */
-        align-items: center; /* vertical center */
-        justify-content: center; /* horizontal center */
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         font-size: 12px;
-        height: 28px; /* consistent pill height */
-        padding: 0 12px; /* horizontal padding only */
-        min-width: 80px; /* same visual width for all three */
+        height: 28px;
+        padding: 0 12px;
+        min-width: 80px;
         text-align: center;
         white-space: nowrap;
         letter-spacing: 0;
@@ -214,7 +217,6 @@
         margin-right: 4px;
     }
 
-        /* no extra gap after the last pill */
         .cs-seg--layout .seg:last-child {
             margin-right: 0;
         }
