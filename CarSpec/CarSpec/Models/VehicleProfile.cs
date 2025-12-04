@@ -38,6 +38,12 @@
         public string? LastKnownVin { get; set; }   // lock to this VIN once learned
         public bool StrictProfileLock { get; set; } // optional: let user toggle (default false)
 
+        public List<string>? LastStoredDtc { get; set; }
+        public List<string>? LastPendingDtc { get; set; }
+        public List<string>? LastPermanentDtc { get; set; }
+        public DateTime? LastDtcReadUtc { get; set; }
+        public DateTime? LastDtcClearedUtc { get; set; }
+
         // 🔹 Add these two OPTIONAL CAN header props
         public string? CanHeaderTx { get; set; }
         public string? CanHeaderRxFilter { get; set; }

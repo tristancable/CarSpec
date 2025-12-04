@@ -3,16 +3,17 @@
 @using CarSpec.Constants
 @using CarSpec.Utils.OBDData
 @using Microsoft.AspNetCore.Components.Forms
+@using System.ComponentModel.DataAnnotations
 @inject CarSpec.Interfaces.IAppStorage Storage
 @inject CarSpec.Interfaces.IVehicleProfileService Profiles
 @inject NavigationManager Nav
 
 <h2 class="cs-title">My Garage</h2>
 
-@if (Profiles.Current is VehicleProfile cur && !string.IsNullOrWhiteSpace(cur.Model))
+@* @if (Profiles.Current is VehicleProfile cur && !string.IsNullOrWhiteSpace(cur.Model))
 {
     <p>Active Vehicle: <strong>@cur.Year @cur.Make @cur.Model</strong></p>
-}
+} *@
 
 @if (_cars is null)
 {
@@ -37,40 +38,65 @@ else
                 @if (IsEditing(c))
                 {
                     <!-- Edit form -->
-                    <div class="cs-stat">
-                        <span class="label">Nickname</span>
-                        <InputText @bind-Value="_edit.ProfileName" />
-                    </div>
+                    <EditForm EditContext="_editContext" OnValidSubmit="@(() => SaveEdit(c))">
+                        <DataAnnotationsValidator />
 
-                    <div class="cs-stat">
-                        <span class="label">Odometer (mi)</span>
-                        <InputNumber @bind-Value="_edit.OdometerMiles" />
-                    </div>
+                        <div class="cs-stat cs-stat--field">
+                            <span class="label">Nickname</span>
+                            <div class="value value--field">
+                                <InputText @bind-Value="_edit.ProfileName" class="cs-input cs-input--stat" />
+                            </div>
+                        </div>
 
-                    <div class="cs-stat">
-                        <span class="label">Adapter Name</span>
-                        <InputText @bind-Value="_edit.PreferredAdapterName" placeholder="e.g., VEEPEAK" />
-                    </div>
+                        <div class="cs-stat cs-stat--field">
+                            <span class="label">Odometer (mi)</span>
+                            <div class="value value--field">
+                                <InputNumber @bind-Value="_edit.OdometerMiles" class="cs-input cs-input--stat" />
+                            </div>
+                        </div>
 
-                    <div class="cs-stat">
-                        <span class="label">Redline Start</span>
-                        <InputNumber @bind-Value="_edit.TachRedlineStart" />
-                    </div>
+                        <div class="cs-stat cs-stat--field">
+                            <span class="label">Adapter Name</span>
+                            <div class="value value--field">
+                                <InputText @bind-Value="_edit.PreferredAdapterName"
+                                           class="cs-input cs-input--stat"
+                                           placeholder="e.g., VEEPEAK" />
+                            </div>
+                        </div>
 
-                    <div class="cs-stat">
-                        <span class="label">Redline End</span>
-                        <InputNumber @bind-Value="_edit.TachMaxRpm" />
-                    </div>
+                        <div class="cs-stat cs-stat--field">
+                            <span class="label">Redline Start</span>
+                            <div class="value value--field">
+                                <InputNumber @bind-Value="_edit.TachRedlineStart"
+                                             class="cs-input cs-input--stat" />
+                                <ValidationMessage For="@(() => _edit.TachRedlineStart)" />
+                            </div>
+                        </div>
 
-                    <div class="cs-stat">
-                        <span class="label">Max Speed (mph)</span>
-                        <InputNumber @bind-Value="_edit.SpeedMaxMph" />
-                    </div>
 
-                    <div style="display:flex;gap:8px;margin-top:10px">
-                        <button class="cs-btn primary" @onclick="() => SaveEdit(c)">💾 Save</button>
-                        <button class="cs-btn btn-secondary" @onclick="CancelEdit">Cancel</button>
-                    </div>
+                        <div class="cs-stat cs-stat--field">
+                            <span class="label">Redline End</span>
+                            <div class="value value--field">
+                                <InputNumber @bind-Value="_edit.TachMaxRpm"
+                                             class="cs-input cs-input--stat" />
+                                <ValidationMessage For="@(() => _edit.TachMaxRpm)" />
+                            </div>
+                        </div>
+
+                        <div class="cs-stat cs-stat--field">
+                            <span class="label">Max Speed (mph)</span>
+                            <div class="value value--field">
+                                <InputNumber @bind-Value="_edit.SpeedMaxMph"
+                                             class="cs-input cs-input--stat" />
+                                <ValidationMessage For="@(() => _edit.SpeedMaxMph)" />
+                            </div>
+                        </div>
+
+                        <div style="display:flex;gap:8px;margin-top:10px">
+                            <button class="cs-btn primary" type="submit">Save</button>
+                            <button class="cs-btn btn-secondary" type="button" @onclick="CancelEdit">Cancel</button>
+                        </div>
+                    </EditForm>
                 }
                 else
                 {
@@ -138,7 +164,6 @@ else
 
                     <hr style="opacity:.25" />
 
-                    <!-- Learned on first successful connection -->
                     <details style="margin-top:8px">
                         <summary class="cs-link">Show learned ECU details</summary>
                         @if (!string.IsNullOrWhiteSpace(c.PreferredTransport))
@@ -219,7 +244,7 @@ else
 
                     <div style="display:flex;gap:8px;margin-top:10px">
                         <button class="cs-btn primary" @onclick="() => MakeActive(c)">Set Active</button>
-                        <button class="cs-btn" @onclick="() => StartEdit(c)">✏️ Edit</button>
+                        <button class="cs-btn" @onclick="() => StartEdit(c)">Edit</button>
                         <button class="cs-btn btn-secondary" @onclick="() => Delete(c)">Delete</button>
                     </div>
                 }
@@ -236,7 +261,6 @@ else
                         Supported PIDs — @_modalTitle
                         <span class="cs-modal__count">(@_filteredPids.Count())</span>
                     </h3>
-                    @* <button class="cs-btn btn-secondary" @onclick="ClosePidsModal">Close</button> *@
                 </div>
 
                 <div class="pid-toolbar">
@@ -267,22 +291,29 @@ else
 @code {
     private List<VehicleProfile>? _cars;
 
-    // --- Edit state ---
-    private string? _editingKey; // Year|Make|Model
+    private string? _editingKey;
     private EditDto _edit = new();
     private bool _showPidsModal;
     private List<string> _modalPids = new();
     private string _modalTitle = string.Empty;
     private string _pidQuery = string.Empty;
     private List<(string pid, string? name)> _modalEntries = new();
+    private EditContext? _editContext;
 
     private sealed class EditDto
     {
         public string? ProfileName { get; set; }
         public string? PreferredAdapterName { get; set; }
-        public int? TachMaxRpm { get; set; }
+
+        [Range(0, 12000, ErrorMessage = "Redline start must be between 0 and 12000 rpm.")]
         public int? TachRedlineStart { get; set; }
+
+        [Range(0, 12000, ErrorMessage = "Redline max must be between 0 and 12000 rpm.")]
+        public int? TachMaxRpm { get; set; }
+
+        [Range(0, 400, ErrorMessage = "Max speed must be between 0 and 400 mph.")]
         public int? SpeedMaxMph { get; set; }
+
         public int? OdometerMiles { get; set; }
     }
 
@@ -300,7 +331,6 @@ else
     {
         await RefreshCarsAsync();
 
-        // If empty, seed from Current once (optional)
         if (_cars!.Count == 0 && Profiles.Current is VehicleProfile cur && !string.IsNullOrWhiteSpace(cur.Model))
         {
             await Profiles.AddAsync(cur);
@@ -330,12 +360,15 @@ else
             SpeedMaxMph = v.SpeedMaxMph,
             OdometerMiles = v.OdometerMiles,
         };
+
+        _editContext = new EditContext(_edit);
     }
 
     private void CancelEdit()
     {
         _editingKey = null;
         _edit = new();
+        _editContext = null;
     }
 
     private async Task SaveEdit(VehicleProfile original)
@@ -351,19 +384,17 @@ else
             Model = original.Model,
             Engine = original.Engine,
 
-            // editable in the UI
             PreferredTransport = original.PreferredTransport,
             PreferredAdapterName = _edit.PreferredAdapterName,
             TachMaxRpm = _edit.TachMaxRpm,
             TachRedlineStart = _edit.TachRedlineStart,
             SpeedMaxMph = _edit.SpeedMaxMph,
 
-            OdometerMiles       = _edit.OdometerMiles,
-            OdometerUpdatedUtc  = _edit.OdometerMiles.HasValue
+            OdometerMiles = _edit.OdometerMiles,
+            OdometerUpdatedUtc = _edit.OdometerMiles.HasValue
                                     ? DateTime.UtcNow
                                     : original.OdometerUpdatedUtc,
 
-            // keep any previously learned/advanced settings
             ProtocolHint = original.ProtocolHint,
             ProtocolDetected = original.ProtocolDetected,
             InitScript = original.InitScript?.ToList() ?? new(),
@@ -429,7 +460,7 @@ else
     private static string DisplayTransport(string? t)
     {
         if (string.IsNullOrWhiteSpace(t)) return "Auto";
-        return t; // e.g., "BLE", "WIFI", "USB"
+        return t;
     }
 
     private static string PreviewList(IEnumerable<string>? items, int max = 5)

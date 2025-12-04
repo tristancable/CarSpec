@@ -3,7 +3,7 @@
 
 <div class="recplay-float">
     <div class="rec-toolbar">
-        @* ── TOP ROW: selection + speed ── *@
+        @* ── TOP ROW: selection + speed + delete ── *@
         <div class="rec-top-row cs-badge cs-badge--panel compact-chip">
             <select class="cs-input cs-input--sm"
                     style="min-width:160px"
@@ -28,7 +28,49 @@
                 <option value="2" selected="@IsCurrentSpeed(2)">2×</option>
                 <option value="3" selected="@IsCurrentSpeed(3)">3×</option>
             </select>
+
+            @* DELETE CURRENT RECORDING *@
+            <button class="cs-iconbtn rec-transport-btn rec-delete-btn"
+                    title="Delete this recording"
+                    aria-label="Delete this recording"
+                    @onclick="OnDeleteClicked"
+                    disabled="@string.IsNullOrWhiteSpace(SelectedReplayId)">
+                🗑
+            </button>
+
+            @* EXPORT CURRENT RECORDING *@
+            <button class="cs-iconbtn rec-transport-btn"
+                    title="Export this recording"
+                    aria-label="Export this recording"
+                    @onclick="OnExportClicked"
+                    disabled="@string.IsNullOrWhiteSpace(SelectedReplayId)">
+                ⬇
+            </button>
         </div>
+
+        @* ── PROGRESS ROW: scrub bar + timestamps ── *@
+        @* @if (ReplayDurationMs is > 0) *@
+        @* { *@
+            <div class="rec-progress-row">
+                <input type="range"
+                       min="0"
+                       max="@ReplayDurationMs"
+                       value="@(_scrubPreviewMs ?? ReplayPositionMs ?? 0)"
+                       class="rec-progress-slider"
+                       style="@GetProgressStyle()"
+                       @oninput="OnScrubPreview"
+                       @onchange="OnScrubCommit" />
+
+                <div class="rec-progress-labels">
+                    <span class="rec-progress-time">
+                        @FormatMs(ReplayPositionMs ?? 0)
+                    </span>
+                    <span class="rec-progress-time total">
+                        @FormatMs(ReplayDurationMs ?? 0)
+                    </span>
+                </div>
+            </div>
+        @* } *@
 
         @* ── BOTTOM ROW: RECORD + REW + PLAY/PAUSE + FF + STOP ── *@
         <div class="rec-bottom-row">
@@ -57,7 +99,7 @@
                     }
                 }
 
-                @* REWIND (visual only for now) *@
+                @* REWIND *@
                 <button class="cs-iconbtn rec-transport-btn"
                         title="Rewind"
                         aria-label="Rewind"
@@ -66,7 +108,7 @@
                     ⏮
                 </button>
 
-                @* PLAY / PAUSE combined *@
+                @* PLAY / PAUSE *@
                 <button class="cs-iconbtn rec-transport-btn"
                         title="@PlayButtonTitle"
                         aria-label="@PlayButtonTitle"
@@ -75,7 +117,7 @@
                     @PlayButtonIcon
                 </button>
 
-                @* FAST FORWARD (visual only for now) *@
+                @* FAST FORWARD *@
                 <button class="cs-iconbtn rec-transport-btn"
                         title="Fast forward"
                         aria-label="Fast forward"
@@ -106,6 +148,8 @@
     [Parameter] public string? SelectedReplayId { get; set; }
     [Parameter] public IReadOnlyList<RecordingMeta> Replays { get; set; } = Array.Empty<RecordingMeta>();
     [Parameter] public double ReplaySpeed { get; set; } = 1.0;
+    [Parameter] public long? ReplayPositionMs { get; set; }
+    [Parameter] public long? ReplayDurationMs { get; set; }
 
     [Parameter] public bool DisableRecord { get; set; }
     [Parameter] public bool DisableReplay { get; set; }
@@ -119,10 +163,20 @@
     [Parameter] public EventCallback PauseReplay { get; set; }
     [Parameter] public EventCallback ResumeReplay { get; set; }
 
+    [Parameter] public EventCallback OnRewind { get; set; }
+    [Parameter] public EventCallback OnFastForward { get; set; }
+
     [Parameter] public EventCallback<string> ReplaySelectionChanged { get; set; }
     [Parameter] public EventCallback<double> ReplaySpeedChanged { get; set; }
 
+    [Parameter] public EventCallback<string> DeleteReplay { get; set; }
+
+    [Parameter] public EventCallback<string> ExportReplay { get; set; }
+
+    [Parameter] public EventCallback<long> SeekRequested { get; set; }
+
     private string _localSelectedId = "";
+    private long? _scrubPreviewMs;
 
     protected override void OnParametersSet()
     {
@@ -131,6 +185,38 @@
         {
             _localSelectedId = SelectedReplayId!;
         }
+
+        if (_scrubPreviewMs.HasValue && ReplayPositionMs.HasValue &&
+            Math.Abs(_scrubPreviewMs.Value - ReplayPositionMs.Value) > 250)
+        {
+            _scrubPreviewMs = null;
+        }
+    }
+
+    private void OnScrubPreview(ChangeEventArgs e)
+    {
+        if (long.TryParse(e.Value?.ToString(), out var ms))
+        {
+            _scrubPreviewMs = ms;
+        }
+    }
+
+    private async Task OnScrubCommit(ChangeEventArgs e)
+    {
+        if (!SeekRequested.HasDelegate) return;
+
+        if (long.TryParse(e.Value?.ToString(), out var ms))
+        {
+            _scrubPreviewMs = null;
+            await SeekRequested.InvokeAsync(ms);
+        }
+    }
+
+    private static string FormatMs(long ms)
+    {
+        if (ms <= 0) return "00:00";
+        var ts = TimeSpan.FromMilliseconds(ms);
+        return $"{(int)ts.TotalMinutes:00}:{ts.Seconds:00}";
     }
 
     private Task HandleReplayChanged(ChangeEventArgs e)
@@ -162,7 +248,20 @@
         return $"{(int)ts.TotalMinutes:00}:{ts.Seconds:00}";
     }
 
-    // --- Transport helpers ---
+    private string GetProgressStyle()
+    {
+        if (ReplayDurationMs is not > 0)
+            return "--cs-progress:0%;";
+
+        long current = _scrubPreviewMs ?? ReplayPositionMs ?? 0;
+        double pct = Math.Clamp(
+            (double)current / ReplayDurationMs.Value,
+            0.0,
+            1.0
+        ) * 100.0;
+
+        return $"--cs-progress:{pct.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}%;";
+    }
 
     private bool PlayButtonDisabled =>
         !IsReplaying && (DisableReplay || string.IsNullOrWhiteSpace(SelectedReplayId) || IsPreparingReplay);
@@ -178,18 +277,32 @@
             : "▶";
 
     private Task OnPlayOrPauseClicked()
-    {
-        if (IsReplaying)
-            return TogglePauseReplay();
-        else
-            return StartReplay.InvokeAsync();
-    }
+        => IsReplaying ? TogglePauseReplay()
+                       : StartReplay.InvokeAsync();
 
     private Task TogglePauseReplay()
         => IsReplayPaused ? ResumeReplay.InvokeAsync()
                           : PauseReplay.InvokeAsync();
 
-    // Rewind / FF are placeholders for now (buttons are disabled unless IsReplaying)
-    private Task OnRewindClicked() => Task.CompletedTask;
-    private Task OnFastForwardClicked() => Task.CompletedTask;
+    private Task OnRewindClicked()
+        => OnRewind.HasDelegate ? OnRewind.InvokeAsync() : Task.CompletedTask;
+
+    private Task OnFastForwardClicked()
+        => OnFastForward.HasDelegate ? OnFastForward.InvokeAsync() : Task.CompletedTask;
+
+    private Task OnDeleteClicked()
+    {
+        if (!DeleteReplay.HasDelegate || string.IsNullOrWhiteSpace(SelectedReplayId))
+            return Task.CompletedTask;
+
+        return DeleteReplay.InvokeAsync(SelectedReplayId!);
+    }
+
+    private Task OnExportClicked()
+    {
+        if (!ExportReplay.HasDelegate || string.IsNullOrWhiteSpace(SelectedReplayId))
+            return Task.CompletedTask;
+
+        return ExportReplay.InvokeAsync(SelectedReplayId!);
+    }
 }

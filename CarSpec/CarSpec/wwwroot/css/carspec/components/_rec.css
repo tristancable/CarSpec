@@ -1,0 +1,60 @@
+﻿.rec-progress-row {
+    width: 100%;
+    padding: 2px 8px 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.rec-progress-slider {
+    width: 100%;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 3px;
+    border-radius: 999px;
+    background: linear-gradient( to right, var(--cs-amber) 0, var(--cs-amber) var(--cs-progress, 0%), rgba(255,255,255,0.08) var(--cs-progress, 0%), rgba(255,255,255,0.04) 100% );
+    outline: none;
+}
+
+    .rec-progress-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: transparent;
+        border: none;
+        box-shadow: none;
+        cursor: pointer;
+    }
+
+    .rec-progress-slider::-moz-range-track {
+        height: 3px;
+        border-radius: 999px;
+        background: linear-gradient( to right, var(--cs-amber) 0, var(--cs-amber) var(--cs-progress, 0%), rgba(255,255,255,0.08) var(--cs-progress, 0%), rgba(255,255,255,0.04) 100% );
+    }
+
+    .rec-progress-slider::-moz-range-thumb {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: transparent;
+        border: none;
+        box-shadow: none;
+        cursor: pointer;
+    }
+
+.rec-progress-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    opacity: 0.85;
+}
+
+.rec-progress-time.total {
+    opacity: 0.7;
+}
+
+.recplay-float {
+    transform: translateY(-10px);
+}

@@ -10,6 +10,7 @@ namespace CarSpec.Services.Profiles
         private List<VehicleProfile> _garage = new();
         public VehicleProfile? Current { get; private set; }
         public IReadOnlyList<VehicleProfile> All => _garage;
+        public event Action? CurrentChanged;
 
         public VehicleProfileService(IAppStorage storage) => _storage = storage;
 
@@ -18,7 +19,6 @@ namespace CarSpec.Services.Profiles
             _garage = await _storage.GetAsync<List<VehicleProfile>>(AppKeys.VehicleProfiles)
                       ?? new List<VehicleProfile>();
 
-            // Migration: ensure each has an Id
             foreach (var v in _garage.Where(v => string.IsNullOrWhiteSpace(v.Id)))
                 v.Id = Guid.NewGuid().ToString("N");
 
@@ -27,7 +27,6 @@ namespace CarSpec.Services.Profiles
             if (Current is null && _garage.Count > 0)
                 Current = _garage[0];
 
-            // Persist migration if any Ids were added
             await _storage.SetAsync(AppKeys.VehicleProfiles, _garage);
             if (Current != null)
                 await _storage.SetAsync(AppKeys.VehicleProfile, Current);
@@ -54,9 +53,10 @@ namespace CarSpec.Services.Profiles
 
             await _storage.SetAsync(AppKeys.VehicleProfiles, _garage);
             await _storage.SetAsync(AppKeys.VehicleProfile, Current);
+
+            CurrentChanged?.Invoke();
         }
 
-        // Legacy wrapper used by older pages (no await)
         public void Set(VehicleProfile profile) => _ = SetCurrentAsync(profile);
 
         public async Task AddAsync(VehicleProfile profile)
@@ -104,7 +104,6 @@ namespace CarSpec.Services.Profiles
             await LoadAsync();
             if (Current is null) return;
 
-            // Normalize protocol (drop "AUTO, ")
             static string? Normalize(string? p)
             {
                 if (string.IsNullOrWhiteSpace(p)) return null;
@@ -120,7 +119,6 @@ namespace CarSpec.Services.Profiles
 
             bool changed = false;
 
-            // Never overwrite good data with null/empty; only fill gaps
             if (string.IsNullOrWhiteSpace(Current.PreferredTransport) && !string.IsNullOrWhiteSpace(transport))
             { Current.PreferredTransport = transport; changed = true; }
 
@@ -168,7 +166,6 @@ namespace CarSpec.Services.Profiles
             {
                 Current.LastConnectedUtc = DateTime.UtcNow;
 
-                // single persistence path
                 await UpsertAsync(Current);
                 await SetCurrentAsync(Current);
             }
@@ -181,10 +178,8 @@ namespace CarSpec.Services.Profiles
             if (string.IsNullOrWhiteSpace(profile.Id))
                 profile.Id = Guid.NewGuid().ToString("N");
 
-            // Work on a mutable copy so we can replace/add cleanly
             var list = _garage.ToList();
 
-            // Prefer Id match; fallback to Year|Make|Model for older rows without Id
             int idx = list.FindIndex(p =>
                 (!string.IsNullOrWhiteSpace(p.Id) && p.Id == profile.Id) ||
                 (p.Year == profile.Year && p.Make == profile.Make && p.Model == profile.Model));
@@ -192,10 +187,8 @@ namespace CarSpec.Services.Profiles
             if (idx >= 0) list[idx] = profile;
             else list.Add(profile);
 
-            // Persist to storage
             await _storage.SetAsync(AppKeys.VehicleProfiles, list);
 
-            // Refresh in-memory cache and Current pointer
             _garage = list;
             if (Current?.Id == profile.Id)
                 Current = profile;

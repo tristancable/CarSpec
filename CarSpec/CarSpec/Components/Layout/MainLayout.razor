@@ -1,4 +1,5 @@
 ﻿@inherits LayoutComponentBase
+@implements IDisposable
 
 <div class="cs-shell">
     <nav class="cs-nav">
@@ -150,7 +151,6 @@
     [Inject] CarSpec.Interfaces.IVehicleProfileService Profiles { get; set; } = default!;
     [Inject] NavigationManager Nav { get; set; } = default!;
 
-    // Label like "2002 Subaru WRX" or with nickname if you have it
     string CurrentProfileLabel =>
         Profiles?.Current is null
             ? "No vehicle selected"
@@ -158,8 +158,6 @@
 
     private string BuildProfileLabel(VehicleProfile p)
     {
-        // Adjust to whatever properties your VehicleProfile actually has
-        // (Year/Make/Model/Nickname/etc.)
         var year = string.IsNullOrWhiteSpace(p.Year?.ToString()) ? "" : $"{p.Year} ";
         var make = p.Make ?? "";
         var model = p.Model ?? "";
@@ -173,8 +171,19 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // Make sure profiles are loaded so Current is available
+        Profiles.CurrentChanged += OnProfileChanged;
+
         try { await Profiles.LoadAsync(); } catch { }
+    }
+
+    private void OnProfileChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Profiles.CurrentChanged -= OnProfileChanged;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

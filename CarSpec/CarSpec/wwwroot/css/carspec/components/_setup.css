@@ -199,6 +199,22 @@ input[type=number].cs-input {
     -moz-appearance: textfield;
 }
 
+:root:not([data-theme="light"]) input[type="date"].cs-input::-webkit-calendar-picker-indicator,
+body:not(.light) input[type="date"].cs-input::-webkit-calendar-picker-indicator,
+html:not(.light) input[type="date"].cs-input::-webkit-calendar-picker-indicator {
+    filter: invert(1) brightness(1.25);
+    opacity: 0.9;
+    cursor: pointer;
+}
+
+:root:not([data-theme="dark"]) input[type="date"].cs-input::-webkit-calendar-picker-indicator,
+body:not(.dark) input[type="date"].cs-input::-webkit-calendar-picker-indicator,
+html:not(.dark) input[type="date"].cs-input::-webkit-calendar-picker-indicator {
+    filter: none;
+    opacity: 0.9;
+    cursor: pointer;
+}
+
 /* ——— FOOTER ——— */
 .actions {
     margin-top: 14px;

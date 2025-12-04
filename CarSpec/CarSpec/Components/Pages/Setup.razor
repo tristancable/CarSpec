@@ -12,7 +12,7 @@
 
 <EditForm Model="form" OnValidSubmit="Save">
     <DataAnnotationsValidator />
-    <ValidationSummary />
+    @* <ValidationSummary /> *@
 
     <div class="cs-card setup-card">
         <div class="setup-header">
@@ -25,7 +25,6 @@
             <div class="setup-badge">Step 1 of 1</div>
         </div>
 
-        <!-- Helpful hint to discover BLE name -->
         <div class="setup-banner" style="margin:0 0 12px 0">
           <div style="display:flex;align-items:flex-start;gap:12px">
             <div class="icon">💡</div>
@@ -37,28 +36,27 @@
         </div>
 
         <div class="form-grid">
-            <!-- Free-entry basics (no catalog) -->
             <div class="form-row">
                 <label>Nickname <span class="hint hint--optional">(optional)</span></label>
-                <InputText class="cs-input" @bind-Value="form.ProfileName" placeholder="e.g., My Rally Car" />
+                <InputText class="cs-input cs-input--field" @bind-Value="form.ProfileName" placeholder="e.g., My Rally Car" />
                 <ValidationMessage For="@(() => form.ProfileName)" />
             </div>
 
             <div class="form-row">
                 <label>Year <span class="hint hint--required">(required)</span></label>
-                <InputText class="cs-input" @bind-Value="form.Year" placeholder="e.g., 2002" />
+                <InputText class="cs-input cs-input--field" @bind-Value="form.Year" placeholder="e.g., 2002" />
                 <ValidationMessage For="@(() => form.Year)" />
             </div>
 
             <div class="form-row">
                 <label>Make <span class="hint hint--required">(required)</span></label>
-                <InputText class="cs-input" @bind-Value="form.Make" placeholder="e.g., Subaru" />
+                <InputText class="cs-input cs-input--field" @bind-Value="form.Make" placeholder="e.g., Subaru" />
                 <ValidationMessage For="@(() => form.Make)" />
             </div>
 
             <div class="form-row">
                 <label>Model <span class="hint hint--required">(required)</span></label>
-                <InputText class="cs-input" @bind-Value="form.Model" placeholder="e.g., WRX" />
+                <InputText class="cs-input cs-input--field" @bind-Value="form.Model" placeholder="e.g., WRX" />
                 <ValidationMessage For="@(() => form.Model)" />
             </div>
 
@@ -69,40 +67,41 @@
                     <span class="hint hint--optional">(optional)</span>
                 </label>
 
-                <InputNumber class="cs-input"
+                <InputNumber class="cs-input cs-input--field"
                              @bind-Value="form.OdometerMiles"
                              placeholder="e.g., 145000" />
 
                 <ValidationMessage For="@(() => form.OdometerMiles)" />
             </div>
 
-            <!-- BLE adapter name REQUIRED -->
             <div class="form-row span-2">
                 <label>Bluetooth OBD Name <span class="hint hint--required">(required)</span></label>
-                <InputText class="cs-input" @bind-Value="form.AdapterNamePrimary" placeholder="Exact advertised name (e.g., VEEPEAK)" />
+                <InputText class="cs-input cs-input--field" @bind-Value="form.AdapterNamePrimary" placeholder="Exact advertised name (e.g., VEEPEAK)" />
                 <ValidationMessage For="@(() => form.AdapterNamePrimary)" />
                 <small style="opacity:.85">Must match what your device shows during Bluetooth scan.</small>
             </div>
 
-            <!-- Optional performance presets -->
             <div class="form-row">
                 <label>Redline Start <span class="unit">rpm</span> <span class="hint hint--optional">(optional)</span></label>
-                <InputNumber class="cs-input" @bind-Value="form.RedlineStart" placeholder="(default 7000)" />
+                <InputNumber class="cs-input cs-input--field" @bind-Value="form.RedlineStart" placeholder="(default 7000)" />
+                <ValidationMessage For="@(() => form.RedlineStart)" />
             </div>
 
             <div class="form-row">
                 <label>Redline End / Max RPM <span class="hint hint--optional">(optional)</span></label>
-                <InputNumber class="cs-input" @bind-Value="form.RedlineEnd" placeholder="(default 9000)" />
+                <InputNumber class="cs-input cs-input--field" @bind-Value="form.RedlineEnd" placeholder="(default 9000)" />
+                <ValidationMessage For="@(() => form.RedlineEnd)" />
             </div>
 
             <div class="form-row">
                 <label>Max Speed <span class="unit">mph</span> <span class="hint hint--optional">(optional)</span></label>
-                <InputNumber class="cs-input" @bind-Value="form.MaxSpeedMph" placeholder="(default 140)" />
+                <InputNumber class="cs-input cs-input--field" @bind-Value="form.MaxSpeedMph" placeholder="(default 160)" />
+                <ValidationMessage For="@(() => form.MaxSpeedMph)" />
             </div>
         </div>
 
         <div class="actions">
-            <button class="cs-btn primary" type="submit" disabled="@(!CanSave())">Save</button>
+            <button class="cs-btn primary" type="submit"">Save</button>
             <button class="cs-btn btn-secondary" type="button" @onclick="Cancel">Cancel</button>
         </div>
     </div>
@@ -133,8 +132,13 @@
         [MinLength(2, ErrorMessage = "Adapter name looks too short")]
         public string? AdapterNamePrimary { get; set; }
 
+        [Range(0, 12000, ErrorMessage = "Redline start must be between 0 and 12000 rpm.")]
         public int? RedlineStart { get; set; }
+
+        [Range(0, 12000, ErrorMessage = "Redline max must be between 0 and 12000 rpm.")]
         public int? RedlineEnd { get; set; }
+
+        [Range(0, 400, ErrorMessage = "Max speed must be between 0 and 400 mph.")]
         public int? MaxSpeedMph { get; set; }
     }
 
@@ -175,7 +179,7 @@
 
         int redlineStart = form.RedlineStart ?? 7000;
         int redlineEnd   = form.RedlineEnd   ?? 9000;
-        int maxSpeedMph  = form.MaxSpeedMph ?? 140;
+        int maxSpeedMph  = form.MaxSpeedMph ?? 160;
         if (redlineEnd <= redlineStart) redlineEnd = Math.Max(redlineStart + 500, 6000);
 
         await Profiles.LoadAsync();
@@ -205,7 +209,6 @@
         }
         else
         {
-            // UPDATE existing profile
             var vp = Profiles.Current!;
             vp.ProfileName = form.ProfileName?.Trim();
             vp.Year = form.Year!.Trim();
@@ -221,12 +224,9 @@
             vp.TachMaxRpm       = redlineEnd;
             vp.SpeedMaxMph      = maxSpeedMph;
 
-            // If your service exposes UpdateAsync, prefer it:
-            // await Profiles.UpdateAsync(vp);
             await Profiles.SetCurrentAsync(vp);
         }
 
-        // mark/setup; if you store a global flag, keep it. Better is per-profile id.
         await Storage.SetAsync(AppKeys.SetupCompleted, true);
         await Storage.SetAsync(AppKeys.VehicleProfile, true);
 

@@ -62,6 +62,7 @@ namespace CarSpec.Services.Obd
         public event Action<EcuFingerprint?>? OnFingerprint;
         public event Action<string>? OnLog;
         public event Action<CarData>? OnData;
+        public event Action? OnReplayCompleted;
 
         public event Action? OnStateChanged;
         private void Notify() => OnStateChanged?.Invoke();
@@ -316,7 +317,7 @@ namespace CarSpec.Services.Obd
 
                 Log(_isIso ? "🛠 Using ISO-safe cadence." : "🛠 Using CAN-fast cadence.");
 
-                await EnsureLiveLoopRunningAsync(_ => Notify());
+                _ = EnsureLiveLoopRunningAsync(_ => Notify());
 
                 return true;
             }
@@ -370,6 +371,7 @@ namespace CarSpec.Services.Obd
                 {
                     Log("⏹️ Replay finished");
                     Notify();
+                    OnReplayCompleted?.Invoke();
                 },
                 speed: speed);
 
@@ -555,6 +557,45 @@ namespace CarSpec.Services.Obd
             }
         }
 
+        private async Task PersistDtcSnapshotAsync(DtcSnapshot snap)
+        {
+            await _profiles.LoadAsync();
+            var cur = _profiles.Current;
+            if (cur is null) return;
+
+            // Normalize codes a bit (trim, upper, distinct)
+            static List<string>? Clean(List<string>? src) =>
+                src is { Count: > 0 }
+                    ? src.Where(s => !string.IsNullOrWhiteSpace(s))
+                         .Select(s => s.Trim().ToUpperInvariant())
+                         .Distinct()
+                         .ToList()
+                    : null;
+
+            cur.LastStoredDtc = Clean(snap.Stored);
+            cur.LastPendingDtc = Clean(snap.Pending);
+            cur.LastPermanentDtc = Clean(snap.Permanent);
+            cur.LastDtcReadUtc = DateTime.UtcNow;
+
+            await _profiles.SetCurrentAsync(cur);
+            await _profiles.UpsertAsync(cur);
+        }
+
+        private async Task MarkDtcClearedAsync()
+        {
+            await _profiles.LoadAsync();
+            var cur = _profiles.Current;
+            if (cur is null) return;
+
+            cur.LastStoredDtc = null;
+            cur.LastPendingDtc = null;
+            cur.LastPermanentDtc = null;
+            cur.LastDtcClearedUtc = DateTime.UtcNow;
+
+            await _profiles.SetCurrentAsync(cur);
+            await _profiles.UpsertAsync(cur);
+        }
+
         public Task Disconnect()
         {
             try { _connectCts?.Cancel(); } catch { /* ignore */ }
@@ -686,6 +727,8 @@ namespace CarSpec.Services.Obd
 
             return new CarData { LastUpdated = DateTime.Now };
         }
+
+        // ---------- Capability discovery ----------
 
         private async Task EnsureCapabilitiesAsync()
         {
@@ -840,6 +883,13 @@ namespace CarSpec.Services.Obd
                     var resp = await QueryOnceWithRetryAsync(pid, _pidTimeoutMs);
                     var rawU = (resp.RawResponse ?? string.Empty).ToUpperInvariant();
 
+                    // For debugging (can remove later):
+                    if (!string.IsNullOrWhiteSpace(rawU) && !rawU.Contains("NO DATA") && !rawU.Contains("?"))
+                    {
+                        Log($"[LOOP] {pid} → {rawU}");
+                    }
+                    // End debugging
+
                     if (string.IsNullOrWhiteSpace(rawU) || rawU.Contains("NO DATA") || rawU.Contains("?"))
                     {
                         var strikes = _noDataStrikes.TryGetValue(pid, out var s) ? s + 1 : 1;
@@ -953,21 +1003,38 @@ namespace CarSpec.Services.Obd
             }
         }
 
-        public async Task EnsureLiveLoopRunningAsync(Action<CarData>? onData = null)
+        public Task EnsureLiveLoopRunningAsync(Action<CarData>? onData = null)
         {
             if (_loopRunning)
             {
-                if (LastSnapshot != null) onData?.Invoke(LastSnapshot);
-                return;
+                if (LastSnapshot != null)
+                    onData?.Invoke(LastSnapshot);
             }
-            await StartLiveDataLoopAsync(onData);
+            else
+            {
+                _ = StartLiveDataLoopAsync(onData);
+            }
+
+            return Task.CompletedTask;
         }
 
         public async Task<DtcSnapshot> ReadTroubleCodesAsync()
         {
             if (_adapter == null || !_adapter.IsConnected)
                 return new DtcSnapshot();
-            return await _adapter.ReadDtcAsync();
+
+            var snap = await _adapter.ReadDtcAsync();
+
+            try
+            {
+                await PersistDtcSnapshotAsync(snap);
+            }
+            catch (Exception ex)
+            {
+                Log($"ℹ️ Failed to persist DTC snapshot: {ex.Message}");
+            }
+
+            return snap;
         }
 
         public async Task<bool> ClearTroubleCodesAsync()
@@ -977,9 +1044,16 @@ namespace CarSpec.Services.Obd
 
             var ok = await _adapter.ClearDtcAsync();
             if (ok)
+            {
                 Log("🧹 DTCs cleared (Mode 04). Monitors may reset until drive cycle completes.");
+                try { await MarkDtcClearedAsync(); }
+                catch (Exception ex) { Log($"ℹ️ Failed to mark DTC cleared: {ex.Message}"); }
+            }
             else
+            {
                 Log("⚠️ Failed to clear DTCs.");
+            }
+
             return ok;
         }
 
