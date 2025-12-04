@@ -884,10 +884,10 @@ namespace CarSpec.Services.Obd
                     var rawU = (resp.RawResponse ?? string.Empty).ToUpperInvariant();
 
                     // For debugging (can remove later):
-                    if (!string.IsNullOrWhiteSpace(rawU) && !rawU.Contains("NO DATA") && !rawU.Contains("?"))
-                    {
-                        Log($"[LOOP] {pid} → {rawU}");
-                    }
+                    //if (!string.IsNullOrWhiteSpace(rawU) && !rawU.Contains("NO DATA") && !rawU.Contains("?"))
+                    //{
+                    //    Log($"[LOOP] {pid} → {rawU}");
+                    //}
                     // End debugging
 
                     if (string.IsNullOrWhiteSpace(rawU) || rawU.Contains("NO DATA") || rawU.Contains("?"))
